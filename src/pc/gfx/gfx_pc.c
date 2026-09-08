@@ -343,7 +343,14 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
 
     struct TextureHashmapNode **node = &gfx_texture_cache.hashmap[hash];
     while (*node != NULL && *node - gfx_texture_cache.pool < gfx_texture_cache.pool_pos) {
-        if (CMPADDR((*node)->texture_addr, orig_addr) && (*node)->fmt == fmt && (*node)->siz == siz && (*node)->palette == palette && (*node)->checksum == checksum) {
+        if (CMPADDR((*node)->texture_addr, orig_addr)
+            && (*node)->fmt == fmt
+            && (*node)->siz == siz
+#ifndef EXTERNAL_DATA
+            && (*node)->palette == palette
+            && (*node)->checksum == checksum
+#endif
+        ) {
             gfx_rapi->select_texture(tile, (*node)->texture_id);
             *n = *node;
             return true;
