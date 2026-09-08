@@ -16,6 +16,9 @@
 *.json text
 *.yaml text
 
+# Wii U build scripts execute inside Linux containers.
+/docker/wiiu/*.sh text eol=lf
+
 # Same for binary
 *.bin binary
 *.m64 binary

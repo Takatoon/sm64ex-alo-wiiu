@@ -24,6 +24,9 @@
 const char *sys_ropaths[] = {
     ".", // working directory
     "!", // executable directory
+#ifdef TARGET_WII_U
+    "/vol/content", // read-only content embedded in an Aroma WUHB
+#endif
 #if (defined(__linux__) || defined(__unix__)) && !defined(TARGET_SWITCH)
     // some common UNIX directories for read only stuff
     "/usr/local/share/sm64pc",

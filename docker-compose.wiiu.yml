@@ -1,0 +1,19 @@
+services:
+  wiiu-dev:
+    build:
+      context: docker/wiiu
+    image: sm64ex-alo-wiiu-dev:20260503
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      VERSION: ${VERSION:-us}
+      JOBS: ${JOBS:-4}
+      EXTERNAL_DATA: ${EXTERNAL_DATA:-1}
+      HIGH_FPS_PC: ${HIGH_FPS_PC:-1}
+      BUILD_NAME: ${BUILD_NAME:-sm64ex-alo}
+      BUILD_TITLE: "${BUILD_TITLE:-Super Mario 64 EX}"
+      WUHB_BASENAME: ${WUHB_BASENAME:-}
+      WUHB_AUTHOR: ${WUHB_AUTHOR:-DobleD}
+    stdin_open: true
+    tty: true
