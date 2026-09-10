@@ -7,6 +7,10 @@
 
 #include <tinfl.h>
 
+#ifdef TARGET_WII_U
+#include <coreinit/mutex.h>
+#endif
+
 #include "macros.h"
 #include "../platform.h"
 #include "fs.h"
@@ -23,6 +27,9 @@ typedef struct {
     fs_dirtree_t tree;    // this should always be first, so this could be used as a dirtree root
     const char *realpath; // physical path to the zip file
     FILE *zipf;           // open zip file handle, if any
+#ifdef TARGET_WII_U
+    OSMutex shared_mutex;  // protects zipf while an atomic whole entry is loaded
+#endif
 } zip_pack_t;
 
 typedef struct {
@@ -284,6 +291,9 @@ static void *pack_zip_mount(const char *realpath) {
 
     pack->realpath = sys_strdup(realpath);
     pack->zipf = f;
+#ifdef TARGET_WII_U
+    OSInitMutex(&pack->shared_mutex);
+#endif
 
     return pack;
 
@@ -469,6 +479,45 @@ static bool pack_zip_eof(UNUSED void *pack, fs_file_t *file) {
     return zipfile->uncomp_pos >= zipfile->entry->uncomp_size;
 }
 
+#ifdef TARGET_WII_U
+static fs_load_result_t pack_zip_load_file(void *pack, const char *vpath, void **buffer,
+                                           uint64_t *size) {
+    zip_pack_t *zip = (zip_pack_t *)pack;
+    zip_entry_t *ent = (zip_entry_t *)fs_dirtree_find((fs_dirtree_t *)zip, vpath);
+    if (!ent || ent->tree.is_dir) return FS_LOAD_NOT_FOUND;
+    if (ent->comptype != 0) return FS_LOAD_UNSUPPORTED;
+
+    OSLockMutex(&zip->shared_mutex);
+    zip_file_t cursor;
+    memset(&cursor, 0, sizeof(cursor));
+    cursor.entry = ent;
+    cursor.fstream = zip->zipf;
+
+    if ((!ent->ofs_fixed && !zip_fixup_offset(&cursor))
+        || fseek(zip->zipf, ent->ofs, SEEK_SET) != 0) {
+        OSUnlockMutex(&zip->shared_mutex);
+        return FS_LOAD_ERROR;
+    }
+    void *data = malloc(ent->uncomp_size);
+    if (!data) {
+        OSUnlockMutex(&zip->shared_mutex);
+        return FS_LOAD_ERROR;
+    }
+
+    const size_t received = fread(data, 1, ent->uncomp_size, zip->zipf);
+    OSUnlockMutex(&zip->shared_mutex);
+
+    if (received != ent->uncomp_size) {
+        free(data);
+        return FS_LOAD_ERROR;
+    }
+
+    *buffer = data;
+    *size = ent->uncomp_size;
+    return FS_LOAD_SUCCESS;
+}
+#endif
+
 fs_packtype_t fs_packtype_zip = {
     "zip",
     pack_zip_mount,
@@ -483,4 +532,9 @@ fs_packtype_t fs_packtype_zip = {
     pack_zip_size,
     pack_zip_eof,
     pack_zip_close,
+#ifdef TARGET_WII_U
+    pack_zip_load_file,
+#else
+    NULL,
+#endif
 };

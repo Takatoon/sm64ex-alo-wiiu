@@ -46,6 +46,13 @@ typedef struct fs_file_s {
     fs_dir_t *parent; // directory containing this file
 } fs_file_t;
 
+typedef enum {
+    FS_LOAD_NOT_FOUND = 0,
+    FS_LOAD_SUCCESS,
+    FS_LOAD_UNSUPPORTED,
+    FS_LOAD_ERROR,
+} fs_load_result_t;
+
 // list of paths; returned by fs_enumerate()
 typedef struct {
     char **paths;
@@ -76,6 +83,10 @@ typedef struct {
     int64_t (*size)(void *pack, fs_file_t *file); // returns -1 in case of error, size of the (uncompressed) file otherwise
     bool (*eof)(void *pack, fs_file_t *file);     // returns true if there's nothing more to read
     void (*close)(void *pack, fs_file_t *file);   // closes a virtual file previously opened with ->open()
+
+    // Optional optimized path for loading a complete file in a single operation.
+    fs_load_result_t (*load_file)(void *pack, const char *path, void **buffer,
+                                  uint64_t *size);
 } fs_packtype_t;
 
 // takes the supplied NULL-terminated list of read-only directories and mounts all the packs in them,

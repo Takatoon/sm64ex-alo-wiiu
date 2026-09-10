@@ -35,6 +35,24 @@ static fs_packtype_t *fs_packers[] = {
 
 static fs_dir_t *fs_searchpaths = NULL;
 
+#ifdef TARGET_WII_U
+static fs_load_result_t fs_try_fast_load(const char *vpath, void **buffer,
+                                         uint64_t *size) {
+    for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next) {
+        if (dir->packer->load_file) {
+            fs_load_result_t result = dir->packer->load_file(dir->pack, vpath, buffer, size);
+            if (result != FS_LOAD_NOT_FOUND) {
+                return result;
+            }
+        } else if (dir->packer->is_file(dir->pack, vpath)) {
+            // A higher-priority pack owns this path but has no whole-file fast path.
+            return FS_LOAD_UNSUPPORTED;
+        }
+    }
+    return FS_LOAD_NOT_FOUND;
+}
+#endif
+
 static inline fs_dir_t *fs_find_dir(const char *realpath) {
     for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next)
         if (!sys_strcasecmp(realpath, dir->realpath))
@@ -327,6 +345,17 @@ const char *fs_readline(fs_file_t *file, char *dst, uint64_t size) {
 }
 
 void *fs_load_file(const char *vpath, uint64_t *outsize) {
+#ifdef TARGET_WII_U
+    void *fast_buffer = NULL;
+    uint64_t fast_size = 0;
+    fs_load_result_t fast_result = fs_try_fast_load(vpath, &fast_buffer, &fast_size);
+    if (fast_result == FS_LOAD_SUCCESS) {
+        if (outsize) *outsize = fast_size;
+        return fast_buffer;
+    }
+    if (fast_result == FS_LOAD_ERROR) return NULL;
+#endif
+
     fs_file_t *f = fs_open(vpath);
     if (!f) return NULL;
 
