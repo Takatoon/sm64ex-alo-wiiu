@@ -10,6 +10,10 @@
 #include <sys/stat.h>
 #endif
 
+#ifdef TARGET_WII_U
+#include <sysapp/launch.h>
+#endif
+
 #include "sm64.h"
 
 #include "game/memory.h"
@@ -181,7 +185,9 @@ void game_deinit(void) {
 }
 
 void game_exit(void) {
-#if defined(TARGET_SWITCH) || !defined(TARGET_PORT_CONSOLE)
+#ifdef TARGET_WII_U
+    SYSLaunchMenu();
+#elif defined(TARGET_SWITCH) || !defined(TARGET_PORT_CONSOLE)
     game_deinit();
 #ifndef TARGET_WEB
     exit(0);
