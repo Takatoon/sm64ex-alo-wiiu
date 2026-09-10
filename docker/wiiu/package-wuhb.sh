@@ -13,6 +13,7 @@ basepack="${artifact_dir}/sm64ex_res/base.zip"
 content_dir="${artifact_dir}/wuhb-content"
 output="${artifact_dir}/${basename}.wuhb"
 asset_dir="assets/wuhb"
+dist_app_dir="dist/wiiu/apps/${basename}"
 
 case "${version}" in
     us|jp|eu|sh|cn) ;;
@@ -78,3 +79,15 @@ wuhbtool "${artifact}" "${output}" "${args[@]}"
 
 sha256sum "${output}"
 echo "Aroma WUHB ready: ${output}"
+
+# Keep compiler intermediates under build/ and expose a small, FTP-ready SD
+# tree under dist/. Do not clear this directory: locally supplied mods and
+# copied saves must survive later builds.
+mkdir -p "${dist_app_dir}/saves"
+if [[ "${external_data}" == "1" ]]; then
+    mkdir -p "${dist_app_dir}/mods"
+fi
+cp "${output}" "${dist_app_dir}/${basename}.wuhb"
+
+echo "FTP-ready SD tree: dist/wiiu"
+echo "Application directory: ${dist_app_dir}"

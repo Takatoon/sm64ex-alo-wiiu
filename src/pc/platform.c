@@ -7,8 +7,12 @@
 #include <unistd.h>
 
 #ifdef TARGET_WII_U
+#include <coreinit/debug.h>
 #include <whb/sdcard.h>
 #include <whb/log.h>
+#ifndef WIIU_LEGACY_PATHS
+#include <rpxloader/rpxloader.h>
+#endif
 #endif
 
 #ifdef COMMAND_LINE_OPTIONS
@@ -104,16 +108,111 @@ static bool mounted = false;
 
 const char *sys_user_path(void) {
     static bool mounted_set = false;
+#ifndef WIIU_LEGACY_PATHS
+    static bool path_set = false;
+    static char path[SYS_MAX_PATH] = "";
+#endif
     if (!mounted_set) {
         mounted = WHBMountSdCard();
         mounted_set = true;
     }
 
-    if (mounted) {
-        return WHBGetSdCardMountPath();;
-    } else {
+    if (!mounted) {
+#ifndef WIIU_LEGACY_PATHS
+        sys_fatal("The SD card could not be mounted.\n\n"
+                  "Please check the SD card and make sure it is inserted correctly.");
+#else
         return "";
+#endif
     }
+
+#ifdef WIIU_LEGACY_PATHS
+    return WHBGetSdCardMountPath();
+#else
+    if (!path_set) {
+        char executable[SYS_MAX_PATH] = "";
+        RPXLoaderVersion version = 0;
+        RPXLoaderStatus status = RPXLoader_InitLibrary();
+        if (status != RPX_LOADER_RESULT_SUCCESS) {
+            sys_fatal("RPXLoadingModule could not be initialized.\n\n"
+                      "Aroma Beta 11 or newer is required.\n"
+                      "Please update or reinstall Aroma.\n\n"
+                      "RPXLoader error: %s (%d)", RPXLoader_GetStatusStr(status), status);
+        }
+
+        status = RPXLoader_GetVersion(&version);
+        if (status != RPX_LOADER_RESULT_SUCCESS || version < 2) {
+            RPXLoader_DeInitLibrary();
+            sys_fatal("The installed RPXLoadingModule version is not supported.\n\n"
+                      "Aroma Beta 11 or newer is required.\n"
+                      "Please update Aroma.\n\n"
+                      "RPXLoader API version: %u", version);
+        }
+
+        status = RPXLoader_GetPathOfRunningExecutable(executable, sizeof(executable));
+        RPXLoader_DeInitLibrary();
+        if (status != RPX_LOADER_RESULT_SUCCESS || executable[0] == '\0') {
+            sys_fatal("The path of the running WUHB could not be determined.\n\n"
+                      "Please launch the WUHB from the Wii U Menu using Aroma.\n\n"
+                      "RPXLoader error: %s (%d)", RPXLoader_GetStatusStr(status), status);
+        }
+
+        for (char *p = executable; *p; ++p) {
+            if (*p == '\\') *p = '/';
+        }
+        while (executable[0] == '/') {
+            memmove(executable, executable + 1, strlen(executable));
+        }
+        if (strstr(executable, "../") || !strcmp(executable, "..")) {
+            sys_fatal("RPXLoadingModule returned an invalid executable path.\n\n"
+                      "Please update or reinstall Aroma.");
+        }
+
+        char *separator = strrchr(executable, '/');
+        if (separator) {
+            *separator = '\0';
+            snprintf(path, sizeof(path), "%s/%s", WHBGetSdCardMountPath(), executable);
+        } else {
+            snprintf(path, sizeof(path), "%s", WHBGetSdCardMountPath());
+        }
+
+        if (!fs_sys_dir_exists(path)) {
+            sys_fatal("The application directory does not exist.\n\nPath: %s", path);
+        }
+
+        char subdir[SYS_MAX_PATH];
+        snprintf(subdir, sizeof(subdir), "%s/saves", path);
+        if (!fs_sys_dir_exists(subdir) && !fs_sys_mkdir(subdir)) {
+            sys_fatal("The save directory could not be created.\n\n"
+                      "Please check the SD card and make sure it is not write-protected.\n\n"
+                      "Path: %s", subdir);
+        }
+
+#ifdef EXTERNAL_DATA
+        snprintf(subdir, sizeof(subdir), "%s/mods", path);
+        if (!fs_sys_dir_exists(subdir) && !fs_sys_mkdir(subdir)) {
+            sys_fatal("The mods directory could not be created.\n\n"
+                      "Please check the SD card and make sure it is not write-protected.\n\n"
+                      "Path: %s", subdir);
+        }
+#endif
+
+        char config_path[SYS_MAX_PATH];
+        snprintf(config_path, sizeof(config_path), "%s/%s", path, CONFIGFILE_DEFAULT);
+        FILE *probe = fopen(config_path, "ab");
+        if (!probe) {
+            sys_fatal("The application directory is not writable.\n\n"
+                      "Please check the SD card and make sure it is not write-protected.\n\n"
+                      "Path: %s", path);
+        }
+        fclose(probe);
+
+        WHBLogPrintf("Wii U executable path: %s", executable);
+        WHBLogPrintf("Wii U application directory: %s", path);
+        path_set = true;
+    }
+    return path;
+#endif
 }
 
 const char *sys_exe_path(void) {
@@ -122,6 +221,7 @@ const char *sys_exe_path(void) {
 
 static void sys_fatal_impl(const char *msg) {
     WHBLogPrintf("FATAL ERROR:\n%s\n", msg);
+    OSFatal(msg);
     exit(1);
 }
 

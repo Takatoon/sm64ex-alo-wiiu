@@ -20,7 +20,12 @@
 #define FS_TEXTUREDIR "gfx"
 #define FS_SOUNDDIR "sound"
 
-#define SAVE_FILENAME "sm64_save_file.bin"
+#if defined(TARGET_WII_U) && !defined(WIIU_LEGACY_PATHS)
+# define SAVE_FILENAME "saves/sm64_save_file.bin"
+# define FS_USERMODDIR "mods"
+#else
+# define SAVE_FILENAME "sm64_save_file.bin"
+#endif
 
 extern char fs_gamedir[];
 extern char fs_writepath[];

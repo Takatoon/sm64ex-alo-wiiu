@@ -112,5 +112,6 @@ Fork of [sm64pc/sm64ex](https://github.com/sm64pc/sm64ex) with additional featur
 
  * To build for sm64ex platforms, [click here](https://github.com/sm64pc/sm64ex/blob/nightly/README.md).
  * To build for Wii U, [click here](https://github.com/aboood40091/sm64-port/blob/master/README.md). (TARGET_WII_U=1)
+ * This fork's WUHB-adjacent save, config, and mod directories are documented in [docs/wiiu-storage-layout.md](docs/wiiu-storage-layout.md).
  * To build for 3DS, [click here](https://github.com/sm64-port/sm64_3ds/blob/master/README.md). (TARGET_N3DS=1)
  * To build for Switch, [click here](https://github.com/fgsfdsfgs/sm64ex/blob/switch/README.md). (TARGET_SWITCH=1)

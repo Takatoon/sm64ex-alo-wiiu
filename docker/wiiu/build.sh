@@ -4,6 +4,17 @@ set -euo pipefail
 version="${VERSION:-us}"
 jobs="${JOBS:-4}"
 rom="baserom.${version}.z64"
+legacy_paths="${WIIU_LEGACY_PATHS:-0}"
+
+legacy_path_args=()
+case "${legacy_paths}" in
+    0) ;;
+    1) legacy_path_args+=(WIIU_LEGACY_PATHS=1) ;;
+    *)
+        echo "Unsupported WIIU_LEGACY_PATHS '${legacy_paths}'. Use 0 or 1." >&2
+        exit 2
+        ;;
+esac
 
 case "${version}" in
     us|jp|eu|sh|cn) ;;
@@ -29,7 +40,8 @@ make -j"${jobs}" \
     TARGET_WII_U=1 \
     VERSION="${version}" \
     EXTERNAL_DATA="${EXTERNAL_DATA:-1}" \
-    HIGH_FPS_PC="${HIGH_FPS_PC:-1}"
+    HIGH_FPS_PC="${HIGH_FPS_PC:-1}" \
+    "${legacy_path_args[@]}"
 
 artifact="build/${version}_wiiu/sm64.${version}.f3dex2e.rpx"
 if [[ ! -s "${artifact}" ]]; then

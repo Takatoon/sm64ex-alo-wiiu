@@ -114,7 +114,11 @@ bool fs_init(const char **rodirs, const char *gamedir, const char *writepath) {
     // first, scan all possible paths and mount all basedirs in them
     for (const char **p = rodirs; p && *p; ++p)
         scan_path_dir(fs_convert_path(buf, sizeof(buf), *p), FS_BASEDIR);
+#if defined(TARGET_WII_U) && !defined(WIIU_LEGACY_PATHS)
+    scan_path_dir(fs_writepath, FS_USERMODDIR);
+#else
     scan_path_dir(fs_writepath, FS_BASEDIR);
+#endif
 
     // then mount all the gamedirs in them, if the game dir isn't the same
     if (sys_strcasecmp(FS_BASEDIR, fs_gamedir)) {

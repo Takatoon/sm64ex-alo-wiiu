@@ -50,6 +50,7 @@
 # General project-specific ignores
 doxygen/doxygen/*
 build/*
+dist/
 !/lib/discord/*
 *.dump
 *.mio0

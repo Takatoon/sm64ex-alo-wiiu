@@ -29,6 +29,10 @@ TARGET_RPI ?= 0
 TARGET_WEB ?= 0
 # Build for the Wii U
 TARGET_WII_U ?= 0
+# Keep the original Wii U layout at the SD root instead of storing mutable
+# data beside the running WUHB/RPX.
+WIIU_LEGACY_PATHS ?= 0
+$(eval $(call validate-option,WIIU_LEGACY_PATHS,0 1))
 # Build for the 3DS
 TARGET_N3DS ?= 0
 # Build for Nintendo Switch
@@ -252,11 +256,18 @@ ifeq ($(TARGET_WII_U),1)
 
   WUT_ROOT	?=	$(DEVKITPRO)/wut
 
+  ifneq ($(WIIU_LEGACY_PATHS),1)
+    WUMS_ROOT ?= $(DEVKITPRO)/wums
+  endif
+
   RPXSPECS	:=	-specs=$(WUT_ROOT)/share/wut.specs
 
   MACHDEP	= -DESPRESSO -mcpu=750 -meabi -mhard-float
 
   LIBDIRS	    := $(PORTLIBS) $(WUT_ROOT)
+  ifneq ($(WIIU_LEGACY_PATHS),1)
+    LIBDIRS += $(WUMS_ROOT)
+  endif
   INCLUDE	    := $(foreach dir,$(LIBDIRS),-I$(dir)/include)
   LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 endif
@@ -353,6 +364,9 @@ else ifeq ($(TARGET_WEB),1)
   DEFINES += TARGET_WEB=1 USE_GLES=1
 else ifeq ($(TARGET_WII_U),1)
   DEFINES += TARGET_WII_U=1
+  ifeq ($(WIIU_LEGACY_PATHS),1)
+    DEFINES += WIIU_LEGACY_PATHS=1
+  endif
 else ifeq ($(TARGET_N3DS),1)
   DEFINES += TARGET_N3DS=1
 else ifeq ($(TARGET_SWITCH),1)
@@ -1105,6 +1119,9 @@ LDFLAGS := -lm -lGL -lSDL2 $(NO_PIE_DEF) -s TOTAL_MEMORY=64MB -g4 --source-map-b
 
 else ifeq ($(TARGET_WII_U),1)
 LDFLAGS := -lm $(NO_PIE_DEF) $(BACKEND_LDFLAGS) $(MACHDEP) $(RPXSPECS) $(LIBPATHS)
+ifneq ($(WIIU_LEGACY_PATHS),1)
+  LDFLAGS += -lrpxloader
+endif
 
 else ifeq ($(TARGET_N3DS),1)
 LDFLAGS := $(LIBPATHS) -lcitro3d -lctru -lm -specs=3dsx.specs -g -marm -mthumb-interwork -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft # -Wl,-Map,$(notdir $*.map)

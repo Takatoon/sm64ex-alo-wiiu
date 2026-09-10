@@ -14,7 +14,11 @@
 
 #include "course_table.h"
 
+#if defined(TARGET_WII_U) && !defined(WIIU_LEGACY_PATHS)
+#define FILENAME_FORMAT "%s/saves/sm64_save_file_%d.sav"
+#else
 #define FILENAME_FORMAT "%s/sm64_save_file_%d.sav"
+#endif
 #define NUM_COURSES 15
 #define NUM_BONUS_COURSES 10
 #define NUM_FLAGS 21
