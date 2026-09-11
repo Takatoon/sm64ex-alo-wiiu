@@ -33,6 +33,10 @@
 #include "pc/audio/audio_3ds_threading.h"
 #endif
 
+#ifndef TARGET_N64
+#include "pc/configfile.h"
+#endif
+
 #ifdef EXT_DEBUG_MENU
 #include "extras/debug_menu.h"
 #endif
@@ -51,6 +55,31 @@ Gfx *gDisplayListHead;
 u8 *gGfxPoolEnd;
 #endif
 struct GfxPool *gGfxPool;
+
+#ifndef TARGET_N64
+static void display_fps_counter(void) {
+    static OSTime lastTime;
+    OSTime currentTime;
+    f32 fps;
+
+    if (!configShowFPS) {
+        lastTime = 0;
+        return;
+    }
+
+    currentTime = osGetTime();
+    if (lastTime != 0 && currentTime > lastTime) {
+#ifdef HIGH_FPS_PC
+        const f32 frameMultiplier = 2.0f;
+#else
+        const f32 frameMultiplier = 1.0f;
+#endif
+        fps = frameMultiplier * 1000000.0f / (currentTime - lastTime);
+        print_text_fmt_int(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 184, "FPS %d", (s16) fps);
+    }
+    lastTime = currentTime;
+}
+#endif
 
 // OS Controllers
 OSContStatus gControllerStatuses[4];
@@ -789,6 +818,10 @@ void game_loop_one_iteration(void) {
 #endif
 
         display_and_vsync();
+
+#ifndef TARGET_N64
+        display_fps_counter();
+#endif
 
 #ifndef USE_SYSTEM_MALLOC
         // when debug info is enabled, print the "BUF %d" information.

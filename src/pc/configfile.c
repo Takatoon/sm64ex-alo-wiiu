@@ -107,6 +107,7 @@ bool configDiscordRPC = true;
 
 bool configSkipIntro = false;
 bool configHUD = true;
+bool configShowFPS = false;
 
 #if MORE_VANILLA_CAM_STUFF
 ConfigVanillaCam configVanillaCam = {
@@ -186,6 +187,7 @@ static const struct ConfigOption options[] = {
     {.name = "discordrpc_enable",    .type = CONFIG_TYPE_BOOL, .boolValue = &configDiscordRPC},
     #endif
     {.name = "skip_intro",           .type = CONFIG_TYPE_BOOL, .boolValue = &configSkipIntro},
+    {.name = "show_fps",             .type = CONFIG_TYPE_BOOL, .boolValue = &configShowFPS},
 #if MORE_VANILLA_CAM_STUFF
     {.name = "vanillacam_parallel",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVanillaCam.parallel},  
     {.name = "vanillacam_srmario",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVanillaCam.srMario},

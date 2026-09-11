@@ -75,6 +75,8 @@
 #define TEXT_OPT_RESETWND  _("RESET WINDOW")
 
 #define TEXT_OPT_HUD       _("HUD")
+#define TEXT_OPT_HUD_DISPLAY _("DISPLAY HUD")
+#define TEXT_OPT_SHOW_FPS  _("SHOW FPS")
 #define TEXT_OPT_MOUSE     _("MOUSE")
 
 #define TEXT_BIND_A        _("A BUTTON")
@@ -152,6 +154,8 @@
 #define TEXT_OPT_RESETWND  _("Reset Window")
 
 #define TEXT_OPT_HUD       _("HUD")
+#define TEXT_OPT_HUD_DISPLAY _("Display HUD")
+#define TEXT_OPT_SHOW_FPS  _("Show FPS")
 #define TEXT_OPT_MOUSE     _("Mouse")
 
 #define TEXT_BIND_A        _("A Button")

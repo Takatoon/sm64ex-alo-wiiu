@@ -97,6 +97,7 @@ extern ConfigPuppyCam configPuppyCam;
 #endif
 
 extern bool         configHUD;
+extern bool         configShowFPS;
 #ifdef MOUSE_ACTIONS
 extern bool         configMouse;
 #endif

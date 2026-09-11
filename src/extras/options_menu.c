@@ -115,6 +115,13 @@ static const u8 optsSettingsStr[][SIZEOPTC(32)] = {
     { TEXT_OPT_MOUSE },
 };
 
+#ifndef TARGET_N64
+static const u8 optsHudStr[][SIZEOPTC(32)] = {
+    { TEXT_OPT_HUD_DISPLAY },
+    { TEXT_OPT_SHOW_FPS },
+};
+#endif
+
 #if !defined(TARGET_N64) && !defined(TARGET_PORT_CONSOLE)
 static const u8 optBindStr[][SIZEOPTC(32)] = {
     { TEXT_OPT_UNBOUND },
@@ -267,8 +274,21 @@ static struct Option optsAudio[] = {
     DEF_OPT_SCROLL( optsAudioStr[3], &configEnvVolume, 0, MAX_VOLUME, 1),
 };
 
+#ifndef TARGET_N64
+static struct Option optsHud[] = {
+    DEF_OPT_TOGGLE( optsHudStr[0], &configHUD ),
+    DEF_OPT_TOGGLE( optsHudStr[1], &configShowFPS ),
+};
+
+static struct SubMenu menuHud = DEF_SUBMENU( optsSettingsStr[0], optsHud );
+#endif
+
 static struct Option optsSettings[] = {
+#ifndef TARGET_N64
+    DEF_OPT_SUBMENU( optsSettingsStr[0], &menuHud ),
+#else
     DEF_OPT_TOGGLE( optsSettingsStr[0], &configHUD ),
+#endif
 #ifdef MOUSE_ACTIONS
     DEF_OPT_TOGGLE( optsSettingsStr[1], &configMouse ),
 #endif
