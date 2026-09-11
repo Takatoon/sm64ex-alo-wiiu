@@ -29,6 +29,10 @@ void gfx_start_frame(void);
 void gfx_run(Gfx *commands);
 void gfx_end_frame(void);
 void gfx_precache_textures(void);
+#ifdef TARGET_WII_U
+void gfx_precache_startup_textures(void);
+void gfx_precache_level_textures(s16 level_num);
+#endif
 void gfx_shutdown(void);
 
 #ifdef __cplusplus

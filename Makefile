@@ -1346,6 +1346,13 @@ endif
 $(SOUND_BIN_DIR)/sound_data.o: $(SOUND_FILES)
 $(BUILD_DIR)/levels/scripts.o: $(BUILD_DIR)/include/level_headers.h
 
+ifeq ($(TARGET_WII_U),1)
+  # The Wii U consumes a generated C table directly; no runtime manifest
+  # parser or profiling database is required.
+  WIIU_PRELOAD_TABLES := src/pc/gfx/wiiu_level_preload_tables.inc.h
+  $(BUILD_DIR)/src/pc/gfx/gfx_pc.o: $(WIIU_PRELOAD_TABLES)
+endif
+
 ifeq ($(VERSION),eu)
   TEXT_DIRS := text/de text/us text/fr
 

@@ -17,6 +17,9 @@
 #include <PR/gbi.h>
 
 #include "config.h"
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+#include "level_table.h"
+#endif
 
 #include "gfx_pc.h"
 #include "gfx_cc.h"
@@ -94,12 +97,21 @@ struct TextureHashmapNode {
     bool linear_filter;
 
     uint32_t checksum;
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+    // Only names created by the preloader are owned by the cache.
+    bool owns_texture_addr;
+#endif
 };
 static struct {
     struct TextureHashmapNode *hashmap[HASHMAP_LEN];
     struct TextureHashmapNode pool[MAX_CACHED_TEXTURES];
     uint32_t pool_pos;
 } gfx_texture_cache;
+
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+static bool gfx_preload_global_loaded;
+#include "wiiu_level_preload_tables.inc.h"
+#endif
 
 struct ColorCombiner {
     uint32_t cc_id;
@@ -210,6 +222,7 @@ static inline size_t string_hash(const uint8_t *str) {
         h = 31 * h + *p;
     return h;
 }
+
 #endif
 
 #ifdef TARGET_N3DS
@@ -359,6 +372,16 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     }
     if (gfx_texture_cache.pool_pos == sizeof(gfx_texture_cache.pool) / sizeof(struct TextureHashmapNode)) {
         // Pool is full. We just invalidate everything and start over.
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+        for (uint32_t i = 0; i < gfx_texture_cache.pool_pos; ++i) {
+            if (gfx_texture_cache.pool[i].owns_texture_addr) {
+                free((void *) gfx_texture_cache.pool[i].texture_addr);
+                gfx_texture_cache.pool[i].owns_texture_addr = false;
+            }
+        }
+        gfx_preload_global_loaded = false;
+#endif
+        memset(gfx_texture_cache.hashmap, 0, sizeof(gfx_texture_cache.hashmap));
         gfx_texture_cache.pool_pos = 0;
         node = &gfx_texture_cache.hashmap[hash];
         // puts("Clearing texture cache");
@@ -378,10 +401,31 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     (*node)->siz = siz;
     (*node)->palette = palette;
     (*node)->checksum = checksum;
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+    (*node)->owns_texture_addr = false;
+#endif
     *n = *node;
     return false;
     #undef CMPADDR
 }
+
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+// Read-only lookup used before allocating a stable cache-owned texture name.
+// It deliberately does not insert a node or change the selected GPU texture.
+static bool gfx_texture_cache_contains_name(const char *name, uint32_t fmt, uint32_t siz) {
+    size_t hash = (string_hash((const uint8_t *) name) >> HASH_SHIFT) & HASH_MASK;
+    struct TextureHashmapNode *node = gfx_texture_cache.hashmap[hash];
+    while (node != NULL && node - gfx_texture_cache.pool < gfx_texture_cache.pool_pos) {
+        if (node->texture_addr != NULL
+            && !sys_strcasecmp((const char *) node->texture_addr, name)
+            && node->fmt == fmt && node->siz == siz) {
+            return true;
+        }
+        node = node->next;
+    }
+    return false;
+}
+#endif
 
 #ifndef EXTERNAL_DATA
 
@@ -591,7 +635,6 @@ static void import_texture_ci8(int tile) {
 static inline void load_texture(const char *fullpath) {
     int w, h;
     uint64_t imgsize = 0;
-
     u8 *imgdata = fs_load_file(fullpath, &imgsize);
     if (imgdata) {
         // TODO: implement stbi_callbacks or something instead of loading the whole texture
@@ -644,10 +687,11 @@ static bool texname_to_texformat(const char *name, u8 *fmt, u8 *siz) {
     return false;
 }
 
-// calls import_texture() on every texture in the res folder
-// we can get the format and size from the texture files
-// and then cache them using gfx_texture_cache_lookup
-static bool preload_texture(void *user, const char *path) {
+#ifdef TARGET_WII_U
+// Preload one external path using the same cache and PNG upload path as normal
+// rendering. The generated manifest strings are static; the cache owns only
+// the duplicate made on a miss.
+static void preload_texture_path(const char *path) {
     // strip off the extension
     char texname[SYS_MAX_PATH];
     strncpy(texname, path, sizeof(texname));
@@ -659,22 +703,63 @@ static bool preload_texture(void *user, const char *path) {
     u8 fmt, siz;
     if (!texname_to_texformat(texname, &fmt, &siz)) {
         fprintf(stderr, "unknown texture format: `%s`, skipping\n", texname);
-        return true; // just skip it, might be a stray skybox or something
+        return;
     }
 
     char *actualname = texname;
     // strip off the prefix // TODO: make a fs_ function for this shit
     if (!strncmp(FS_TEXTUREDIR "/", actualname, 4)) actualname += 4;
-    // this will be stored in the hashtable, so make a copy
+    // A hit needs no allocation. On a miss the cache owns the duplicated name
+    // until its pool is reset; normal render-path names remain non-owned.
+    if (gfx_texture_cache_contains_name(actualname, fmt, siz)) return;
+
+    char *owned_name = sys_strdup(actualname);
+    assert(owned_name);
+
+    struct TextureHashmapNode *n;
+    if (!gfx_texture_cache_lookup(0, &n, (const uint8_t *) owned_name, fmt, siz, 0, 0)) {
+        n->owns_texture_addr = true;
+        load_texture(path);
+    } else {
+        // Defensive only: there is no parallel loader, but do not leak if the
+        // cache changes between the read-only lookup and insertion.
+        free(owned_name);
+    }
+}
+
+// Adapter used by the legacy full-pack fs_walk() precache.
+static bool preload_texture(void *user, const char *path) {
+    (void) user;
+    preload_texture_path(path);
+    return true;
+}
+#else
+// Legacy full-pack preloader used by non-Wii U ports.
+static bool preload_texture(void *user, const char *path) {
+    char texname[SYS_MAX_PATH];
+    strncpy(texname, path, sizeof(texname));
+    texname[sizeof(texname)-1] = 0;
+    char *dot = strrchr(texname, '.');
+    if (dot) *dot = 0;
+
+    u8 fmt, siz;
+    if (!texname_to_texformat(texname, &fmt, &siz)) {
+        fprintf(stderr, "unknown texture format: `%s`, skipping\n", texname);
+        return true;
+    }
+
+    char *actualname = texname;
+    if (!strncmp(FS_TEXTUREDIR "/", actualname, 4)) actualname += 4;
     actualname = sys_strdup(actualname);
     assert(actualname);
 
     struct TextureHashmapNode *n;
     if (!gfx_texture_cache_lookup(0, &n, actualname, fmt, siz, 0, 0))
-        load_texture(path); // new texture, load it
+        load_texture(path);
 
     return true;
 }
+#endif
 
 #endif // EXTERNAL_DATA
 
@@ -1991,6 +2076,57 @@ void gfx_precache_textures(void) {
     // preload all textures
     fs_walk(FS_TEXTUREDIR, preload_texture, NULL, true);
 }
+
+#ifdef TARGET_WII_U
+static void gfx_precache_path_index(uint16_t path_index) {
+    assert(path_index < sizeof(gfx_preload_paths) / sizeof(gfx_preload_paths[0]));
+    preload_texture_path(gfx_preload_paths[path_index]);
+}
+
+static void gfx_precache_bundle(const struct GfxPreloadBundle *bundle) {
+    for (uint16_t i = 0; i < bundle->count; ++i) {
+        gfx_precache_path_index(bundle->indices[i]);
+    }
+}
+
+static const struct GfxPreloadBundle *gfx_get_level_preload_bundle(s16 level_num) {
+    const struct GfxPreloadBundle *bundle = NULL;
+
+    // Keep the special ending data separate from the 30 gameplay manifests.
+    if (level_num == LEVEL_ENDING) {
+        bundle = &gfx_preload_ending_bundle;
+    } else if (level_num > LEVEL_NONE && level_num < LEVEL_COUNT
+               && gfx_preload_level_bundles[level_num].indices != NULL) {
+        bundle = &gfx_preload_level_bundles[level_num];
+    }
+    return bundle;
+}
+
+void gfx_precache_startup_textures(void) {
+    // This runs after GX2 initialization and before the first visible frame.
+    // Reusing the level path loads global + Castle Grounds and leaves both in
+    // the same cache used by subsequent world preloads.
+    gfx_precache_level_textures(LEVEL_CASTLE_GROUNDS);
+}
+
+void gfx_precache_level_textures(s16 level_num) {
+    const struct GfxPreloadBundle *level_bundle;
+    level_bundle = gfx_get_level_preload_bundle(level_num);
+    if (level_bundle == NULL) return; // Unknown levels retain normal on-demand loading.
+
+    const bool global_pending = !gfx_preload_global_loaded;
+
+    if (global_pending) {
+        gfx_precache_bundle(&gfx_preload_global_bundle);
+        gfx_preload_global_loaded = true;
+    }
+    gfx_precache_bundle(level_bundle);
+
+    // The generated front-end block is intentionally separate and reserved
+    // for a later measurement-driven startup experiment.
+    (void) gfx_preload_front_end_bundle;
+}
+#endif
 #endif
 
 struct GfxRenderingAPI *gfx_get_current_rendering_api(void) {

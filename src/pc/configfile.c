@@ -175,6 +175,8 @@ static const struct ConfigOption options[] = {
     {.name = "rumble_strength",      .type = CONFIG_TYPE_UINT, .uintValue = &configRumbleStrength},
 #endif
     #ifdef EXTERNAL_DATA
+    // On Wii U, false uses selective level preloading. Other ports retain
+    // their original on-demand behavior.
     {.name = "precache",             .type = CONFIG_TYPE_BOOL, .boolValue = &configPrecacheRes},
     #endif
     #ifdef MOUSE_ACTIONS

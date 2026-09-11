@@ -36,6 +36,9 @@
 #ifndef TARGET_N64
 #include "pc/pc_main.h"
 #include "pc/configfile.h"
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+#include "pc/gfx/gfx_pc.h"
+#endif
 #endif
 
 #ifdef COMMAND_LINE_OPTIONS
@@ -1318,6 +1321,11 @@ s32 lvl_init_or_update(s16 initOrUpdate, UNUSED s32 unused) {
 
     switch (initOrUpdate) {
         case 0:
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
+            // With full startup precaching disabled, pause under the existing
+            // transition before initializing the destination world.
+            if (!configPrecacheRes) gfx_precache_level_textures(gCurrLevelNum);
+#endif
             result = init_level();
             break;
         case 1:

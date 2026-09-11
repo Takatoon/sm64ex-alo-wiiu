@@ -396,12 +396,18 @@ void main_func(void) {
     inited = true;
 
 #ifdef EXTERNAL_DATA
-    // precache data if needed
     if (configPrecacheRes) {
         fprintf(stdout, "precaching data\n");
         fflush(stdout);
         gfx_precache_textures();
     }
+#ifdef TARGET_WII_U
+    else {
+        // Load common resources and Castle Grounds before the first visible
+        // frame; later worlds preload under their existing transition.
+        gfx_precache_startup_textures();
+    }
+#endif
 #endif
 
 #ifdef DISCORDRPC
