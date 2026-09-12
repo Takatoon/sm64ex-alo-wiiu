@@ -1,6 +1,74 @@
 # sm64ex_alo
 Fork of [sm64pc/sm64ex](https://github.com/sm64pc/sm64ex) with additional features. 
 
+## Wii U fork
+
+This repository extends `sm64ex-alo` with a Wii U-focused build and runtime
+workflow. The original project documentation and feature list are preserved
+below.
+
+### Wii U changes
+
+* Improved external texture loading and preloading to reduce interruptions
+  while playing with HD texture packs.
+* Added a guided build tool that compiles the game and adjusts texture-pack
+  quality to help it run smoothly on Wii U.
+* Fixed **Save and Exit** after collecting a star so it returns directly to the
+  Wii U Menu.
+* Added WUHB packaging with custom titles and artwork, together with an
+  FTP-ready SD card layout.
+* Can keep configuration, save files, and mods together in the application
+  folder; the original SD card root layout remains available as an option.
+* Added an optional FPS counter under **Settings > HUD**, disabled by default.
+* Adjusted face-button mappings for the Wii U GamePad and Wii U Pro Controller.
+
+### Requirements
+
+* Docker Desktop configured to use Linux containers.
+* A legally obtained Super Mario 64 ROM. ROMs and copyrighted game assets are
+  not included in this repository.
+* Aroma Beta 11 or newer when using the default application-local storage
+  layout.
+
+### Quick start
+
+Place the required user files under `user-assets/` as described in the
+[Wii U Docker guide](docs/wiiu-docker.md), then run:
+
+```bat
+build-wiiu.cmd
+```
+
+The completed SD card structure is generated under:
+
+```text
+build/dist/wiiu/
+```
+
+Copy that directory to the root of the SD card. The resulting application uses
+the following layout by default:
+
+```text
+SD:/wiiu/apps/<name>/
+├── <name>.wuhb
+├── sm64config.txt
+├── saves/
+└── mods/
+```
+
+See the [build guide](docs/wiiu-docker.md) for the complete workflow and the
+[storage layout documentation](docs/wiiu-storage-layout.md) for runtime paths,
+embedded resources, and legacy compatibility.
+
+### Credits
+
+This fork builds on [sm64ex-alo](https://github.com/AloUltraExt/sm64ex-alo),
+the [SM64 decompilation project](https://github.com/n64decomp/sm64),
+[sm64ex](https://github.com/sm64pc/sm64ex), and the Wii U work by
+[AboodXD](https://github.com/aboood40091). Please refer to the original
+projects and this repository's commit history for their respective authors and
+contributions.
+
 ## Changes
  * N64 Building - Support for it was removed in sm64ex
  * Based of the latest refresh (since sm64ex is stuck on 12)

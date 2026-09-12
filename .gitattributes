@@ -9,7 +9,7 @@
 *.js text
 *.md text
 *.py text
-*.sh text
+*.sh text eol=lf
 *.ld text
 *.inc text
 *.txt text

@@ -48,7 +48,14 @@ sd:/sm64_save_file.bin
 sd:/sm64ex_res/
 ```
 
-For the Docker workflow:
+The root build wizard exposes this as **SD card root (legacy)** under
+**Storage layout**. For automation:
+
+```sh
+bash ./build-wiiu-textures.sh --game-only --legacy-paths enabled
+```
+
+For the lower-level Docker workflow:
 
 ```sh
 WIIU_LEGACY_PATHS=1 docker compose -f docker-compose.wiiu.yml run --rm wiiu-dev
@@ -60,7 +67,8 @@ From Windows Command Prompt:
 set WIIU_LEGACY_PATHS=1 && docker compose -f docker-compose.wiiu.yml run --rm wiiu-dev
 ```
 
-No flag is needed for the default WUHB-adjacent layout.
+No flag is needed for the default WUHB-adjacent layout. In a combined wizard
+build, the legacy texture pack is staged under `build/dist/sm64ex_res/`.
 
 ## FTP-ready output
 

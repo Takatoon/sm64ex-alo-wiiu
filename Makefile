@@ -1291,7 +1291,7 @@ $(BASEPACK_LST): $(EXE_DEPEND)
 	@$(foreach f, $(wildcard $(SKYTILE_DIR)/*), echo $(f) gfx/$(f:$(BUILD_DIR)/%=%) >> $(BASEPACK_LST);)
 	@find actors -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
 	@find levels -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
-	@find textures -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
+	@find textures -name \*.png ! -path 'textures/skyboxes/*' -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
   ifeq ($(PORT_MOP_OBJS),1)
 	@find src/extras/mop/actors -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
   endif

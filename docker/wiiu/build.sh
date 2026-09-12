@@ -29,9 +29,11 @@ if [[ ! -f "${rom}" ]]; then
     exit 3
 fi
 
-# Build flags are not represented in the original dependency graph. Start from
-# a clean target directory so configuration changes always reach the RPX.
-make TARGET_WII_U=1 VERSION="${version}" clean
+# Build flags are not represented in the original dependency graph. Remove
+# only this region's intermediate files so configuration changes reach the RPX
+# without deleting the finished products stored under build/dist.
+target_build_dir="build/${version}_wiiu"
+rm -rf -- "${target_build_dir}"
 
 # Host-built extraction tools are not reusable inside this Linux container.
 make -C tools clean

@@ -3,6 +3,7 @@ set -euo pipefail
 
 version="${VERSION:-us}"
 external_data="${EXTERNAL_DATA:-1}"
+legacy_paths="${WIIU_LEGACY_PATHS:-0}"
 build_name="${BUILD_NAME:-sm64ex-alo}"
 title="${BUILD_TITLE:-Super Mario 64 EX}"
 basename="${WUHB_BASENAME:-${build_name}}"
@@ -12,8 +13,9 @@ artifact_dir="$(dirname "${artifact}")"
 basepack="${artifact_dir}/sm64ex_res/base.zip"
 content_dir="${artifact_dir}/wuhb-content"
 output="${artifact_dir}/${basename}.wuhb"
-asset_dir="assets/wuhb"
-dist_app_dir="dist/wiiu/apps/${basename}"
+asset_dir="${WUHB_ASSET_DIR:-user-assets/wuhb}"
+dist_root="${DIST_ROOT:-dist/wiiu}"
+dist_app_dir="${dist_root}/apps/${basename}"
 
 case "${version}" in
     us|jp|eu|sh|cn) ;;
@@ -27,6 +29,14 @@ case "${external_data}" in
     0|1) ;;
     *)
         echo "Unsupported EXTERNAL_DATA '${external_data}'. Use 0 or 1." >&2
+        exit 2
+        ;;
+esac
+
+case "${legacy_paths}" in
+    0|1) ;;
+    *)
+        echo "Unsupported WIIU_LEGACY_PATHS '${legacy_paths}'. Use 0 or 1." >&2
         exit 2
         ;;
 esac
@@ -82,12 +92,16 @@ echo "Aroma WUHB ready: ${output}"
 
 # Keep compiler intermediates under build/ and expose a small, FTP-ready SD
 # tree under dist/. Do not clear this directory: locally supplied mods and
-# copied saves must survive later builds.
-mkdir -p "${dist_app_dir}/saves"
-if [[ "${external_data}" == "1" ]]; then
-    mkdir -p "${dist_app_dir}/mods"
+# copied saves must survive later builds. Legacy builds store mutable data at
+# the SD root and therefore do not stage unused app-local directories.
+mkdir -p "${dist_app_dir}"
+if [[ "${legacy_paths}" == "0" ]]; then
+    mkdir -p "${dist_app_dir}/saves"
+    if [[ "${external_data}" == "1" ]]; then
+        mkdir -p "${dist_app_dir}/mods"
+    fi
 fi
 cp "${output}" "${dist_app_dir}/${basename}.wuhb"
 
-echo "FTP-ready SD tree: dist/wiiu"
+echo "FTP-ready SD tree: ${dist_root}"
 echo "Application directory: ${dist_app_dir}"

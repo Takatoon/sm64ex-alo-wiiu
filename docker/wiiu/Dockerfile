@@ -15,7 +15,7 @@ WORKDIR /workspace
 COPY --from=librpxloader /artifacts ${DEVKITPRO}
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bsdextrautils \
+    && apt-get install -y --no-install-recommends bsdextrautils python3-numpy python3-pil \
     && rm -rf /var/lib/apt/lists/*
 
 RUN powerpc-eabi-gcc --version \

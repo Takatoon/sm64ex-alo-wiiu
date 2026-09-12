@@ -1,0 +1,27 @@
+# Persistent in-game HUD: digits 0-9.
+gfx/textures/segment2/segment2.00000.rgba16.png
+gfx/textures/segment2/segment2.00200.rgba16.png
+gfx/textures/segment2/segment2.00400.rgba16.png
+gfx/textures/segment2/segment2.00600.rgba16.png
+gfx/textures/segment2/segment2.00800.rgba16.png
+gfx/textures/segment2/segment2.00A00.rgba16.png
+gfx/textures/segment2/segment2.00C00.rgba16.png
+gfx/textures/segment2/segment2.00E00.rgba16.png
+gfx/textures/segment2/segment2.01000.rgba16.png
+gfx/textures/segment2/segment2.01200.rgba16.png
+
+# Multiplier, coin, Mario head, and star.
+gfx/textures/segment2/segment2.05600.rgba16.png
+gfx/textures/segment2/segment2.05800.rgba16.png
+gfx/textures/segment2/segment2.05A00.rgba16.png
+gfx/textures/segment2/segment2.05C00.rgba16.png
+
+# Camera status.
+gfx/textures/segment2/segment2.07B50.rgba16.png
+gfx/textures/segment2/segment2.07D50.rgba16.png
+gfx/textures/segment2/segment2.07F50.rgba16.png
+gfx/textures/segment2/segment2.08150.rgba16.png
+gfx/textures/segment2/segment2.081D0.rgba16.png
+
+# Complete power meter.
+gfx/actors/power_meter/*.png
