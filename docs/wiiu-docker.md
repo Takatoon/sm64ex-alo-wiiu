@@ -5,6 +5,9 @@ includes devkitPPC, WUT, the Wii U port libraries, SDL2, Python, Pillow, NumPy,
 Make, and all tools required to build the game and convert texture packs. The
 host only needs Docker Desktop configured to use Linux containers.
 
+Optional load-time instrumentation is documented in
+[Wii U load-time profiling](wiiu-load-profiling.md).
+
 ## User files
 
 Place user-provided files under the following directory at the repository root:

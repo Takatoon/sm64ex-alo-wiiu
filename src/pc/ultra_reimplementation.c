@@ -1,6 +1,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include <PR/os_time.h>
+#include <whb/log.h>
+#endif
 #include "macros.h"
 #include "platform.h"
 #include "fs/fs.h"
@@ -181,12 +185,37 @@ s32 osEepromLongWrite(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes
     }, content);
     s32 ret = 0;
 #else
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_begin_us = osGetTime();
+#endif
     FILE *fp = fopen(fs_get_write_path(SAVE_FILENAME), "wb");
     if (fp == NULL) {
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        const uint64_t profile_end_us = osGetTime();
+        WHBLogPrintf("LOADTIME_SAVE_IO address=%u bytes=%d result=-1 open_us=%llu write_us=0 close_us=0 total_us=%llu",
+                     (unsigned) address, nbytes,
+                     (unsigned long long) (profile_end_us - profile_begin_us),
+                     (unsigned long long) (profile_end_us - profile_begin_us));
+#endif
         return -1;
     }
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_open_us = osGetTime();
+#endif
     s32 ret = fwrite(content, 1, EEPROM_SIZE, fp) == EEPROM_SIZE ? 0 : -1;
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_write_us = osGetTime();
+#endif
     fclose(fp);
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_close_us = osGetTime();
+    WHBLogPrintf("LOADTIME_SAVE_IO address=%u bytes=%d result=%d open_us=%llu write_us=%llu close_us=%llu total_us=%llu",
+                 (unsigned) address, nbytes, (int) ret,
+                 (unsigned long long) (profile_open_us - profile_begin_us),
+                 (unsigned long long) (profile_write_us - profile_open_us),
+                 (unsigned long long) (profile_close_us - profile_write_us),
+                 (unsigned long long) (profile_close_us - profile_begin_us));
+#endif
 #endif
     return ret;
 }

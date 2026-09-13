@@ -27,6 +27,9 @@
 #include "seq_ids.h"
 #include "sound_init.h"
 #include "pc/pc_main.h"
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include "pc/gfx/gfx_pc.h"
+#endif
 
 #ifdef CHEATS_ACTIONS
 #include "extras/cheats.h"
@@ -280,6 +283,12 @@ void handle_save_menu(struct MarioState *m) {
 #endif
         || gSaveOptSelectIndex == MENU_OPT_SAVE_AND_QUIT) {
             save_file_do_save(gCurrSaveFileNum - 1);
+
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+            if (gSaveOptSelectIndex == MENU_OPT_SAVE_AND_CONTINUE) {
+                gfx_load_timing_save_confirmed();
+            }
+#endif
 
             if (gSaveOptSelectIndex == MENU_OPT_SAVE_AND_QUIT) {
                 fade_into_special_warp(-2, 0); // reset game

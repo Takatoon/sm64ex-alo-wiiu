@@ -1135,15 +1135,20 @@ s32 play_mode_change_level(void) {
     }
 
     if (--sTransitionTimer == -1) {
+        s32 destinationLevel;
         gHudDisplay.flags = HUD_DISPLAY_NONE;
         sTransitionTimer = 0;
         sTransitionUpdate = NULL;
 
         if (sWarpDest.type != WARP_TYPE_NOT_WARPING) {
-            return sWarpDest.levelNum;
+            destinationLevel = sWarpDest.levelNum;
         } else {
-            return sSpecialWarpDest;
+            destinationLevel = sSpecialWarpDest;
         }
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        gfx_load_timing_begin_level(destinationLevel, "transition-complete");
+#endif
+        return destinationLevel;
     }
 
     return 0;
@@ -1321,12 +1326,18 @@ s32 lvl_init_or_update(s16 initOrUpdate, UNUSED s32 unused) {
 
     switch (initOrUpdate) {
         case 0:
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+            gfx_load_timing_begin_init(gCurrLevelNum);
+#endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
             // With full startup precaching disabled, pause under the existing
             // transition before initializing the destination world.
             if (!configPrecacheRes) gfx_precache_level_textures(gCurrLevelNum);
 #endif
             result = init_level();
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+            gfx_load_timing_level_ready(gCurrLevelNum);
+#endif
             break;
         case 1:
             result = update_level();
@@ -1353,6 +1364,9 @@ s32 lvl_init_from_save_file(UNUSED s16 arg0, s32 levelNum) {
                                     _translation_de_mio0SegmentRomEnd);
             break;
     }
+#endif
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_load_timing_begin_level(levelNum, "save-file");
 #endif
     sWarpDest.type = WARP_TYPE_NOT_WARPING;
     sDelayedWarpOp = WARP_OP_NONE;
@@ -1387,6 +1401,9 @@ s32 lvl_init_from_save_file(UNUSED s16 arg0, s32 levelNum) {
 s32 lvl_set_current_level(UNUSED s16 arg0, s32 levelNum) {
     s32 warpCheckpointActive = sWarpCheckpointActive;
 
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_load_timing_begin_level(levelNum, "set-current-level");
+#endif
     sWarpCheckpointActive = FALSE;
     gCurrLevelNum = levelNum;
     gCurrCourseNum = gLevelToCourseNumTable[levelNum - 1];

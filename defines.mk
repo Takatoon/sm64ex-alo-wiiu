@@ -50,6 +50,8 @@ HIGH_FPS_PC ?= 0
 TEXTSAVES ?= 0
 # Load resources from external files
 EXTERNAL_DATA ?= 0
+# Enable Wii U texture and level load timing logs
+WIIU_LOAD_TIMING_PROFILE ?= 0
 # Enable Discord Rich Presence
 DISCORDRPC ?= 0
 # Enable Command Line Options
@@ -89,6 +91,16 @@ ifeq ($(EXTERNAL_DATA),1)
   ifeq ($(TARGET_N64),1)
     $(error External data is not usable on N64)
   endif
+endif
+
+ifeq ($(WIIU_LOAD_TIMING_PROFILE),1)
+  ifneq ($(TARGET_WII_U),1)
+    $(error WIIU_LOAD_TIMING_PROFILE requires TARGET_WII_U=1)
+  endif
+  ifneq ($(EXTERNAL_DATA),1)
+    $(error WIIU_LOAD_TIMING_PROFILE requires EXTERNAL_DATA=1)
+  endif
+  CUSTOM_C_DEFINES += -DWIIU_LOAD_TIMING_PROFILE
 endif
 
 ifeq ($(WINDOW_API),SDL2)

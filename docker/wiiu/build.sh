@@ -43,6 +43,7 @@ make -j"${jobs}" \
     VERSION="${version}" \
     EXTERNAL_DATA="${EXTERNAL_DATA:-1}" \
     HIGH_FPS_PC="${HIGH_FPS_PC:-1}" \
+    WIIU_LOAD_TIMING_PROFILE="${WIIU_LOAD_TIMING_PROFILE:-0}" \
     "${legacy_path_args[@]}"
 
 artifact="build/${version}_wiiu/sm64.${version}.f3dex2e.rpx"

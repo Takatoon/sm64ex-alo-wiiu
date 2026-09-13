@@ -12,6 +12,10 @@
 #include "rumble_init.h"
 #include "macros.h"
 #include "pc/ini.h"
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include <PR/os_time.h>
+#include <whb/log.h>
+#endif
 #ifdef TEXTSAVES
 #include "extras/text_save.h"
 #endif
@@ -374,6 +378,15 @@ void save_file_do_save(s32 fileIndex) {
     if (fileIndex < 0 || fileIndex >= NUM_SAVE_FILES)
         return;
 
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_begin_us = osGetTime();
+    const s32 profile_file_modified = gSaveFileModified;
+    const s32 profile_menu_modified = gMainMenuDataModified;
+    WHBLogPrintf("LOADTIME_SAVE_BEGIN file=%d file_modified=%d menu_modified=%d",
+                 (int) fileIndex, (int) profile_file_modified,
+                 (int) profile_menu_modified);
+#endif
+
     if (gSaveFileModified)
 #ifdef TEXTSAVES
     {
@@ -401,6 +414,15 @@ void save_file_do_save(s32 fileIndex) {
         gSaveFileModified = FALSE;
     }
     save_main_menu_data();
+#endif
+
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_end_us = osGetTime();
+    WHBLogPrintf("LOADTIME_SAVE_END file=%d file_modified=%d menu_modified=%d total_us=%llu total_ms=%llu",
+                 (int) fileIndex, (int) profile_file_modified,
+                 (int) profile_menu_modified,
+                 (unsigned long long) (profile_end_us - profile_begin_us),
+                 (unsigned long long) ((profile_end_us - profile_begin_us) / 1000));
 #endif
 }
 

@@ -6,6 +6,16 @@
 #include <stdbool.h>
 #include <assert.h>
 
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include <PR/os_time.h>
+#include <whb/log.h>
+#include "game/area.h"
+#include "game/camera.h"
+#include "game/game_init.h"
+#include "game/level_update.h"
+#include "game/object_list_processor.h"
+#endif
+
 #ifdef EXTERNAL_DATA
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -111,6 +121,82 @@ static struct {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
 static bool gfx_preload_global_loaded;
 #include "wiiu_level_preload_tables.inc.h"
+#ifdef WIIU_LOAD_TIMING_PROFILE
+static struct {
+    uint32_t sequence;
+    s16 level_num;
+    uint64_t begin_us;
+    uint64_t init_begin_us;
+    uint64_t ready_us;
+    bool pending;
+    bool init_started;
+    bool ready;
+    bool announced;
+} gfx_load_timing;
+
+static struct {
+    uint16_t frames_remaining;
+    uint32_t texture_count;
+    uint64_t texture_us;
+} gfx_post_save_timing;
+
+static uint8_t gfx_preload_depth;
+static uint32_t gfx_runtime_texture_sequence;
+static uint32_t gfx_vcutm_window_sequence;
+
+static struct {
+    uint64_t frame_begin_us;
+    uint64_t run_begin_us;
+    uint64_t dl_begin_us;
+    uint64_t dl_end_us;
+    uint64_t run_end_us;
+    uint32_t draw_calls;
+    uint32_t triangles;
+    uint32_t frames;
+    uint64_t interval_sum_us;
+    uint64_t previous_present_us;
+    uint64_t total_sum_us;
+    uint64_t pre_submit_sum_us;
+    uint64_t setup_sum_us;
+    uint64_t dl_sum_us;
+    uint64_t post_submit_sum_us;
+    uint64_t audio_sum_us;
+    uint64_t finish_sum_us;
+    uint64_t present_sum_us;
+    uint64_t max_total_us;
+    uint64_t max_pre_submit_us;
+    uint64_t max_setup_us;
+    uint64_t max_dl_us;
+    uint64_t max_post_submit_us;
+    uint64_t max_audio_us;
+    uint64_t max_finish_us;
+    uint64_t max_present_us;
+    uint32_t draw_calls_sum;
+    uint32_t triangles_sum;
+    uint32_t max_draw_calls;
+    uint32_t max_triangles;
+    uint32_t runtime_textures;
+    uint64_t runtime_texture_us;
+    s32 worst_mario_x;
+    s32 worst_mario_y;
+    s32 worst_mario_z;
+    s32 worst_camera_x;
+    s32 worst_camera_y;
+    s32 worst_camera_z;
+    s32 worst_focus_x;
+    s32 worst_focus_y;
+    s32 worst_focus_z;
+    s16 worst_camera_yaw;
+    u32 worst_objects;
+} gfx_vcutm_profile;
+
+static void gfx_load_timing_announce(void) {
+    if (gfx_load_timing.announced) return;
+    gfx_load_timing.announced = true;
+    WHBLogPrintf("LOADTIME_SESSION version=2 precache=%s",
+                 configPrecacheRes ? "true" : "false");
+}
+#endif
 #endif
 
 struct ColorCombiner {
@@ -262,6 +348,10 @@ static void gfx_set_iod(unsigned int iod)
 
 static void gfx_flush(void) {
     if (buf_vbo_len > 0) {
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        gfx_vcutm_profile.draw_calls++;
+        gfx_vcutm_profile.triangles += (uint32_t) buf_vbo_num_tris;
+#endif
         gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
         buf_vbo_len = 0;
         buf_vbo_num_tris = 0;
@@ -635,17 +725,81 @@ static void import_texture_ci8(int tile) {
 static inline void load_texture(const char *fullpath) {
     int w, h;
     uint64_t imgsize = 0;
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const bool profile_post_save = gfx_post_save_timing.frames_remaining != 0;
+    const bool profile_runtime = gfx_preload_depth == 0;
+    const uint64_t profile_begin_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
+#endif
     u8 *imgdata = fs_load_file(fullpath, &imgsize);
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t profile_read_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
+#endif
     if (imgdata) {
         // TODO: implement stbi_callbacks or something instead of loading the whole texture
         u8 *data = stbi_load_from_memory(imgdata, imgsize, &w, &h, NULL, 4);
         free(imgdata);
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        const uint64_t profile_decode_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
+#endif
         if (data) {
             gfx_rapi->upload_texture(data, w, h);
             stbi_image_free(data); // don't need this anymore
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+            if (profile_runtime || profile_post_save) {
+                const uint64_t profile_end_us = osGetTime();
+                const uint64_t total_us = profile_end_us - profile_begin_us;
+                if (profile_runtime) {
+                    gfx_runtime_texture_sequence++;
+                    if (gCurrLevelNum == LEVEL_VCUTM) {
+                        gfx_vcutm_profile.runtime_textures++;
+                        gfx_vcutm_profile.runtime_texture_us += total_us;
+                    }
+                    WHBLogPrintf("LOADTIME_RUNTIME_TEXTURE sequence=%u frame=%u level=%d area=%d post_save=%d path=%s bytes=%llu width=%d height=%d read_us=%llu decode_us=%llu upload_us=%llu total_us=%llu",
+                                 (unsigned) gfx_runtime_texture_sequence,
+                                 (unsigned) gGlobalTimer, (int) gCurrLevelNum,
+                                 (int) gCurrAreaIndex, profile_post_save ? 1 : 0,
+                                 fullpath, (unsigned long long) imgsize, w, h,
+                                 (unsigned long long) (profile_read_us - profile_begin_us),
+                                 (unsigned long long) (profile_decode_us - profile_read_us),
+                                 (unsigned long long) (profile_end_us - profile_decode_us),
+                                 (unsigned long long) total_us);
+                }
+                if (profile_post_save) {
+                    gfx_post_save_timing.texture_count++;
+                    gfx_post_save_timing.texture_us += total_us;
+                    WHBLogPrintf("LOADTIME_POST_SAVE_TEXTURE path=%s bytes=%llu width=%d height=%d read_us=%llu decode_us=%llu upload_us=%llu total_us=%llu",
+                                 fullpath, (unsigned long long) imgsize, w, h,
+                                 (unsigned long long) (profile_read_us - profile_begin_us),
+                                 (unsigned long long) (profile_decode_us - profile_read_us),
+                                 (unsigned long long) (profile_end_us - profile_decode_us),
+                                 (unsigned long long) total_us);
+                }
+            }
+#endif
             return;
         }
     }
+
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    if (profile_runtime || profile_post_save) {
+        const uint64_t profile_end_us = osGetTime();
+        if (profile_runtime) {
+            gfx_runtime_texture_sequence++;
+            WHBLogPrintf("LOADTIME_RUNTIME_TEXTURE sequence=%u frame=%u level=%d area=%d post_save=%d path=%s bytes=%llu ok=0 read_us=%llu total_us=%llu",
+                         (unsigned) gfx_runtime_texture_sequence,
+                         (unsigned) gGlobalTimer, (int) gCurrLevelNum,
+                         (int) gCurrAreaIndex, profile_post_save ? 1 : 0,
+                         fullpath, (unsigned long long) imgsize,
+                         (unsigned long long) (profile_read_us - profile_begin_us),
+                         (unsigned long long) (profile_end_us - profile_begin_us));
+        }
+        if (profile_post_save) {
+            WHBLogPrintf("LOADTIME_POST_SAVE_TEXTURE path=%s bytes=%llu ok=0 total_us=%llu",
+                         fullpath, (unsigned long long) imgsize,
+                         (unsigned long long) (profile_end_us - profile_begin_us));
+        }
+    }
+#endif
 
     fprintf(stderr, "could not load texture: `%s`\n", fullpath);
     // replace with missing texture
@@ -729,7 +883,11 @@ static void preload_texture_path(const char *path) {
 
 // Adapter used by the legacy full-pack fs_walk() precache.
 static bool preload_texture(void *user, const char *path) {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    if (user != NULL) (*(uint32_t *) user)++;
+#else
     (void) user;
+#endif
     preload_texture_path(path);
     return true;
 }
@@ -2074,7 +2232,25 @@ void gfx_init(struct GfxWindowManagerAPI *wapi, struct GfxRenderingAPI *rapi, co
 #ifdef EXTERNAL_DATA
 void gfx_precache_textures(void) {
     // preload all textures
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    uint32_t requested = 0;
+    const uint32_t cache_before = gfx_texture_cache.pool_pos;
+    const uint64_t begin_us = osGetTime();
+    gfx_load_timing_announce();
+    WHBLogPrintf("LOADTIME_STARTUP_BEGIN mode=full cache_entries=%u",
+                 (unsigned) cache_before);
+    gfx_preload_depth++;
+    fs_walk(FS_TEXTUREDIR, preload_texture, &requested, true);
+    gfx_preload_depth--;
+    const uint64_t end_us = osGetTime();
+    WHBLogPrintf("LOADTIME_STARTUP_END mode=full requested=%u cache_before=%u cache_after=%u total_us=%llu total_ms=%llu",
+                 (unsigned) requested, (unsigned) cache_before,
+                 (unsigned) gfx_texture_cache.pool_pos,
+                 (unsigned long long) (end_us - begin_us),
+                 (unsigned long long) ((end_us - begin_us) / 1000));
+#else
     fs_walk(FS_TEXTUREDIR, preload_texture, NULL, true);
+#endif
 }
 
 #ifdef TARGET_WII_U
@@ -2102,11 +2278,93 @@ static const struct GfxPreloadBundle *gfx_get_level_preload_bundle(s16 level_num
     return bundle;
 }
 
+#ifdef WIIU_LOAD_TIMING_PROFILE
+static const char *gfx_load_timing_level_name(s16 level_num) {
+    const struct GfxPreloadBundle *bundle = gfx_get_level_preload_bundle(level_num);
+    return bundle != NULL ? bundle->name : "UNKNOWN";
+}
+
+void gfx_load_timing_begin_level(s16 level_num, const char *source) {
+    gfx_load_timing_announce();
+    if (gfx_load_timing.pending && gfx_load_timing.level_num == level_num
+        && !gfx_load_timing.ready) {
+        return;
+    }
+
+    if (gfx_load_timing.pending) {
+        WHBLogPrintf("LOADTIME_LEVEL_ABORT sequence=%u level=%d name=%s",
+                     (unsigned) gfx_load_timing.sequence,
+                     (int) gfx_load_timing.level_num,
+                     gfx_load_timing_level_name(gfx_load_timing.level_num));
+    }
+
+    gfx_load_timing.sequence++;
+    gfx_load_timing.level_num = level_num;
+    gfx_load_timing.begin_us = osGetTime();
+    gfx_load_timing.init_begin_us = 0;
+    gfx_load_timing.ready_us = 0;
+    gfx_load_timing.pending = true;
+    gfx_load_timing.init_started = false;
+    gfx_load_timing.ready = false;
+    WHBLogPrintf("LOADTIME_LEVEL_BEGIN sequence=%u level=%d name=%s source=%s precache=%s",
+                 (unsigned) gfx_load_timing.sequence, (int) level_num,
+                 gfx_load_timing_level_name(level_num), source,
+                 configPrecacheRes ? "true" : "false");
+}
+
+void gfx_load_timing_begin_init(s16 level_num) {
+    if (!gfx_load_timing.pending || gfx_load_timing.level_num != level_num) {
+        gfx_load_timing_begin_level(level_num, "level-script");
+    }
+    gfx_load_timing.init_begin_us = osGetTime();
+    gfx_load_timing.init_started = true;
+}
+
+void gfx_load_timing_level_ready(s16 level_num) {
+    if (!gfx_load_timing.pending || gfx_load_timing.level_num != level_num) {
+        gfx_load_timing_begin_level(level_num, "late-init");
+    }
+    const uint64_t ready_us = osGetTime();
+    gfx_load_timing.ready_us = ready_us;
+    gfx_load_timing.ready = true;
+    WHBLogPrintf("LOADTIME_LEVEL_READY sequence=%u level=%d name=%s transition_to_ready_us=%llu transition_to_ready_ms=%llu init_us=%llu init_ms=%llu precache=%s",
+                 (unsigned) gfx_load_timing.sequence, (int) level_num,
+                 gfx_load_timing_level_name(level_num),
+                 (unsigned long long) (ready_us - gfx_load_timing.begin_us),
+                 (unsigned long long) ((ready_us - gfx_load_timing.begin_us) / 1000),
+                 (unsigned long long) (gfx_load_timing.init_started
+                     ? ready_us - gfx_load_timing.init_begin_us : 0),
+                 (unsigned long long) (gfx_load_timing.init_started
+                     ? (ready_us - gfx_load_timing.init_begin_us) / 1000 : 0),
+                 configPrecacheRes ? "true" : "false");
+}
+
+void gfx_load_timing_save_confirmed(void) {
+    gfx_post_save_timing.frames_remaining = 180;
+    gfx_post_save_timing.texture_count = 0;
+    gfx_post_save_timing.texture_us = 0;
+    WHBLogPrintf("LOADTIME_POST_SAVE_BEGIN frames=180");
+}
+#endif
+
 void gfx_precache_startup_textures(void) {
     // This runs after GX2 initialization and before the first visible frame.
     // Reusing the level path loads global + Castle Grounds and leaves both in
     // the same cache used by subsequent world preloads.
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const uint64_t begin_us = osGetTime();
+    gfx_load_timing_announce();
+    WHBLogPrintf("LOADTIME_STARTUP_BEGIN mode=selective cache_entries=%u",
+                 (unsigned) gfx_texture_cache.pool_pos);
+#endif
     gfx_precache_level_textures(LEVEL_CASTLE_GROUNDS);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const uint64_t end_us = osGetTime();
+    WHBLogPrintf("LOADTIME_STARTUP_END mode=selective cache_after=%u total_us=%llu total_ms=%llu",
+                 (unsigned) gfx_texture_cache.pool_pos,
+                 (unsigned long long) (end_us - begin_us),
+                 (unsigned long long) ((end_us - begin_us) / 1000));
+#endif
 }
 
 void gfx_precache_level_textures(s16 level_num) {
@@ -2115,12 +2373,43 @@ void gfx_precache_level_textures(s16 level_num) {
     if (level_bundle == NULL) return; // Unknown levels retain normal on-demand loading.
 
     const bool global_pending = !gfx_preload_global_loaded;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const uint32_t requested = level_bundle->count
+        + (global_pending ? gfx_preload_global_bundle.count : 0);
+    const uint32_t cache_before = gfx_texture_cache.pool_pos;
+    const uint64_t begin_us = osGetTime();
+    gfx_load_timing_announce();
+    WHBLogPrintf("LOADTIME_PRELOAD_BEGIN sequence=%u level=%d name=%s requested=%u global_pending=%d cache_entries=%u",
+                 (unsigned) gfx_load_timing.sequence, (int) level_num,
+                 level_bundle->name, (unsigned) requested,
+                 global_pending ? 1 : 0, (unsigned) cache_before);
+#endif
 
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_preload_depth++;
+#endif
     if (global_pending) {
         gfx_precache_bundle(&gfx_preload_global_bundle);
         gfx_preload_global_loaded = true;
     }
     gfx_precache_bundle(level_bundle);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_preload_depth--;
+#endif
+
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const uint64_t end_us = osGetTime();
+    const uint32_t cache_after = gfx_texture_cache.pool_pos;
+    const uint32_t loaded = cache_after >= cache_before
+        ? cache_after - cache_before : cache_after;
+    WHBLogPrintf("LOADTIME_PRELOAD_END sequence=%u level=%d name=%s requested=%u loaded=%u reused_or_skipped=%u cache_before=%u cache_after=%u total_us=%llu total_ms=%llu",
+                 (unsigned) gfx_load_timing.sequence, (int) level_num,
+                 level_bundle->name, (unsigned) requested, (unsigned) loaded,
+                 (unsigned) (requested >= loaded ? requested - loaded : 0),
+                 (unsigned) cache_before, (unsigned) cache_after,
+                 (unsigned long long) (end_us - begin_us),
+                 (unsigned long long) ((end_us - begin_us) / 1000));
+#endif
 
     // The generated front-end block is intentionally separate and reserved
     // for a later measurement-driven startup experiment.
@@ -2147,6 +2436,15 @@ uint16_t *get_framebuffer() {
 }
 
 void gfx_start_frame(void) {
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_vcutm_profile.frame_begin_us = osGetTime();
+    gfx_vcutm_profile.run_begin_us = 0;
+    gfx_vcutm_profile.dl_begin_us = 0;
+    gfx_vcutm_profile.dl_end_us = 0;
+    gfx_vcutm_profile.run_end_us = 0;
+    gfx_vcutm_profile.draw_calls = 0;
+    gfx_vcutm_profile.triangles = 0;
+#endif
     gfx_wapi->handle_events();
 #ifndef TARGET_N3DS
     gfx_update_dimensions();
@@ -2154,6 +2452,9 @@ void gfx_start_frame(void) {
 }
 
 void gfx_run(Gfx *commands) {
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_vcutm_profile.run_begin_us = osGetTime();
+#endif
     gfx_sp_reset();
 
     if (!gfx_wapi->start_frame()) {
@@ -2163,17 +2464,167 @@ void gfx_run(Gfx *commands) {
     dropped_frame = false;
 
     gfx_rapi->start_frame();
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_vcutm_profile.dl_begin_us = osGetTime();
+#endif
     gfx_run_dl(commands);
     gfx_flush();
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_vcutm_profile.dl_end_us = osGetTime();
+#endif
     gfx_rapi->end_frame();
     gfx_wapi->swap_buffers_begin();
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_vcutm_profile.run_end_us = osGetTime();
+#endif
 }
+
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_end_us,
+                                    uint64_t present_end_us) {
+    if (gCurrLevelNum != LEVEL_VCUTM || gfx_vcutm_profile.run_begin_us == 0) {
+        memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+        return;
+    }
+
+    const uint64_t total_us = present_end_us - gfx_vcutm_profile.frame_begin_us;
+    const uint64_t pre_submit_us = gfx_vcutm_profile.run_begin_us - gfx_vcutm_profile.frame_begin_us;
+    const uint64_t setup_us = gfx_vcutm_profile.dl_begin_us - gfx_vcutm_profile.run_begin_us;
+    const uint64_t dl_us = gfx_vcutm_profile.dl_end_us - gfx_vcutm_profile.dl_begin_us;
+    const uint64_t post_submit_us = gfx_vcutm_profile.run_end_us - gfx_vcutm_profile.dl_end_us;
+    const uint64_t audio_us = finish_begin_us - gfx_vcutm_profile.run_end_us;
+    const uint64_t finish_us = finish_end_us - finish_begin_us;
+    const uint64_t present_us = present_end_us - finish_end_us;
+    const uint64_t interval_us = gfx_vcutm_profile.previous_present_us != 0
+        ? present_end_us - gfx_vcutm_profile.previous_present_us : 0;
+    gfx_vcutm_profile.previous_present_us = present_end_us;
+    gfx_vcutm_profile.frames++;
+    gfx_vcutm_profile.interval_sum_us += interval_us;
+    gfx_vcutm_profile.total_sum_us += total_us;
+    gfx_vcutm_profile.pre_submit_sum_us += pre_submit_us;
+    gfx_vcutm_profile.setup_sum_us += setup_us;
+    gfx_vcutm_profile.dl_sum_us += dl_us;
+    gfx_vcutm_profile.post_submit_sum_us += post_submit_us;
+    gfx_vcutm_profile.audio_sum_us += audio_us;
+    gfx_vcutm_profile.finish_sum_us += finish_us;
+    gfx_vcutm_profile.present_sum_us += present_us;
+    gfx_vcutm_profile.draw_calls_sum += gfx_vcutm_profile.draw_calls;
+    gfx_vcutm_profile.triangles_sum += gfx_vcutm_profile.triangles;
+    if (pre_submit_us > gfx_vcutm_profile.max_pre_submit_us) gfx_vcutm_profile.max_pre_submit_us = pre_submit_us;
+    if (setup_us > gfx_vcutm_profile.max_setup_us) gfx_vcutm_profile.max_setup_us = setup_us;
+    if (dl_us > gfx_vcutm_profile.max_dl_us) gfx_vcutm_profile.max_dl_us = dl_us;
+    if (post_submit_us > gfx_vcutm_profile.max_post_submit_us) gfx_vcutm_profile.max_post_submit_us = post_submit_us;
+    if (audio_us > gfx_vcutm_profile.max_audio_us) gfx_vcutm_profile.max_audio_us = audio_us;
+    if (finish_us > gfx_vcutm_profile.max_finish_us) gfx_vcutm_profile.max_finish_us = finish_us;
+    if (present_us > gfx_vcutm_profile.max_present_us) gfx_vcutm_profile.max_present_us = present_us;
+    if (gfx_vcutm_profile.draw_calls > gfx_vcutm_profile.max_draw_calls) gfx_vcutm_profile.max_draw_calls = gfx_vcutm_profile.draw_calls;
+    if (gfx_vcutm_profile.triangles > gfx_vcutm_profile.max_triangles) gfx_vcutm_profile.max_triangles = gfx_vcutm_profile.triangles;
+    if (total_us > gfx_vcutm_profile.max_total_us) {
+        gfx_vcutm_profile.max_total_us = total_us;
+        gfx_vcutm_profile.worst_objects = gObjectCounter;
+        if (gMarioState != NULL) {
+            gfx_vcutm_profile.worst_mario_x = (s32) gMarioState->pos[0];
+            gfx_vcutm_profile.worst_mario_y = (s32) gMarioState->pos[1];
+            gfx_vcutm_profile.worst_mario_z = (s32) gMarioState->pos[2];
+        }
+        gfx_vcutm_profile.worst_camera_x = (s32) gLakituState.pos[0];
+        gfx_vcutm_profile.worst_camera_y = (s32) gLakituState.pos[1];
+        gfx_vcutm_profile.worst_camera_z = (s32) gLakituState.pos[2];
+        gfx_vcutm_profile.worst_focus_x = (s32) gLakituState.focus[0];
+        gfx_vcutm_profile.worst_focus_y = (s32) gLakituState.focus[1];
+        gfx_vcutm_profile.worst_focus_z = (s32) gLakituState.focus[2];
+        gfx_vcutm_profile.worst_camera_yaw = gLakituState.yaw;
+    }
+
+    if (gfx_vcutm_profile.frames == 120) {
+        const uint64_t fps_x1000 = gfx_vcutm_profile.interval_sum_us != 0
+            ? (uint64_t) 119 * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
+        gfx_vcutm_window_sequence++;
+        WHBLogPrintf("LOADTIME_VCUTM_TIMING window=%u frames=120 fps_x1000=%llu avg_total_us=%llu max_total_us=%llu avg_pre_submit_us=%llu max_pre_submit_us=%llu avg_setup_us=%llu max_setup_us=%llu avg_dl_us=%llu max_dl_us=%llu avg_post_submit_us=%llu max_post_submit_us=%llu avg_audio_us=%llu max_audio_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu max_present_us=%llu",
+                     (unsigned) gfx_vcutm_window_sequence,
+                     (unsigned long long) fps_x1000,
+                     (unsigned long long) (gfx_vcutm_profile.total_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_total_us,
+                     (unsigned long long) (gfx_vcutm_profile.pre_submit_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_pre_submit_us,
+                     (unsigned long long) (gfx_vcutm_profile.setup_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_setup_us,
+                     (unsigned long long) (gfx_vcutm_profile.dl_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_dl_us,
+                     (unsigned long long) (gfx_vcutm_profile.post_submit_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_post_submit_us,
+                     (unsigned long long) (gfx_vcutm_profile.audio_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_audio_us,
+                     (unsigned long long) (gfx_vcutm_profile.finish_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_finish_us,
+                     (unsigned long long) (gfx_vcutm_profile.present_sum_us / 120),
+                     (unsigned long long) gfx_vcutm_profile.max_present_us);
+        WHBLogPrintf("LOADTIME_VCUTM_SCENE window=%u avg_draw_calls=%u max_draw_calls=%u avg_triangles=%u max_triangles=%u objects=%u runtime_textures=%u runtime_texture_us=%llu mario=%d,%d,%d camera=%d,%d,%d focus=%d,%d,%d yaw=%d",
+                     (unsigned) gfx_vcutm_window_sequence,
+                     (unsigned) (gfx_vcutm_profile.draw_calls_sum / 120),
+                     (unsigned) gfx_vcutm_profile.max_draw_calls,
+                     (unsigned) (gfx_vcutm_profile.triangles_sum / 120),
+                     (unsigned) gfx_vcutm_profile.max_triangles,
+                     (unsigned) gfx_vcutm_profile.worst_objects,
+                     (unsigned) gfx_vcutm_profile.runtime_textures,
+                     (unsigned long long) gfx_vcutm_profile.runtime_texture_us,
+                     (int) gfx_vcutm_profile.worst_mario_x,
+                     (int) gfx_vcutm_profile.worst_mario_y,
+                     (int) gfx_vcutm_profile.worst_mario_z,
+                     (int) gfx_vcutm_profile.worst_camera_x,
+                     (int) gfx_vcutm_profile.worst_camera_y,
+                     (int) gfx_vcutm_profile.worst_camera_z,
+                     (int) gfx_vcutm_profile.worst_focus_x,
+                     (int) gfx_vcutm_profile.worst_focus_y,
+                     (int) gfx_vcutm_profile.worst_focus_z,
+                     (int) gfx_vcutm_profile.worst_camera_yaw);
+        const uint64_t previous_present_us = gfx_vcutm_profile.previous_present_us;
+        memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+        gfx_vcutm_profile.previous_present_us = previous_present_us;
+    }
+}
+#endif
 
 void gfx_end_frame(void) {
     if (!dropped_frame) {
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        const uint64_t profile_finish_begin_us = osGetTime();
+#endif
         gfx_rapi->finish_render();
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        const uint64_t profile_finish_end_us = osGetTime();
+#endif
         gfx_wapi->swap_buffers_end();
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        const uint64_t profile_present_end_us = osGetTime();
+        gfx_profile_vcutm_frame(profile_finish_begin_us, profile_finish_end_us,
+                                profile_present_end_us);
+#endif
         requested_framebuffer = false;
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        if (gfx_load_timing.pending && gfx_load_timing.ready) {
+            const uint64_t frame_us = osGetTime();
+            WHBLogPrintf("LOADTIME_FIRST_FRAME sequence=%u level=%d name=%s total_us=%llu total_ms=%llu ready_to_frame_us=%llu ready_to_frame_ms=%llu precache=%s",
+                         (unsigned) gfx_load_timing.sequence,
+                         (int) gfx_load_timing.level_num,
+                         gfx_load_timing_level_name(gfx_load_timing.level_num),
+                         (unsigned long long) (frame_us - gfx_load_timing.begin_us),
+                         (unsigned long long) ((frame_us - gfx_load_timing.begin_us) / 1000),
+                         (unsigned long long) (frame_us - gfx_load_timing.ready_us),
+                         (unsigned long long) ((frame_us - gfx_load_timing.ready_us) / 1000),
+                         configPrecacheRes ? "true" : "false");
+            gfx_load_timing.pending = false;
+            gfx_load_timing.ready = false;
+            gfx_load_timing.init_started = false;
+        }
+        if (gfx_post_save_timing.frames_remaining != 0
+            && --gfx_post_save_timing.frames_remaining == 0) {
+            WHBLogPrintf("LOADTIME_POST_SAVE_END textures=%u texture_us=%llu texture_ms=%llu",
+                         (unsigned) gfx_post_save_timing.texture_count,
+                         (unsigned long long) gfx_post_save_timing.texture_us,
+                         (unsigned long long) (gfx_post_save_timing.texture_us / 1000));
+        }
+#endif
     }
 }
 
