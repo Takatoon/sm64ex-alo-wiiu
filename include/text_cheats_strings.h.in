@@ -21,6 +21,7 @@
 #define TEXT_OPT_CHEAT9    _("PLAYER SIZE")
 #define TEXT_OPT_CHEAT10   _("BLJ ANYWHERE CHEAT")
 #define TEXT_OPT_CHEAT11   _("WALK ON CHEATS")
+#define TEXT_OPT_CHEAT12   _("NONSTOP STARS")
 
 #define TEXT_CHEAT_MSIZE0   _("NORMAL")
 #define TEXT_CHEAT_MSIZE1   _("TINY")
@@ -54,6 +55,7 @@
 #define TEXT_OPT_CHEAT9    _("Player size")
 #define TEXT_OPT_CHEAT10   _("BLJ anywhere cheat")
 #define TEXT_OPT_CHEAT11   _("Walk on cheats")
+#define TEXT_OPT_CHEAT12   _("Nonstop Stars")
 
 #define TEXT_CHEAT_MSIZE0   _("Normal")
 #define TEXT_CHEAT_MSIZE1   _("Tiny")

@@ -785,6 +785,12 @@ u32 interact_star_or_key(struct MarioState *m, UNUSED u32 interactType, struct O
     u32 noExit = (o->oInteractionSubtype & INT_SUBTYPE_NO_EXIT) != 0;
     u32 grandStar = (o->oInteractionSubtype & INT_SUBTYPE_GRAND_STAR) != 0;
 
+#ifdef CHEATS_ACTIONS
+    if (Cheats.EnableCheats && Cheats.NonstopStars && !grandStar && !obj_has_model(o, MODEL_BOWSER_KEY)) {
+        noExit = TRUE;
+    }
+#endif
+
     if (m->health >= 0x100) {
         mario_stop_riding_and_holding(m);
 #ifdef RUMBLE_FEEDBACK
