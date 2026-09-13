@@ -159,10 +159,10 @@ static void read_wpad(OSContPad* pad) {
                 pad->button |= map[i].n64Button;
             }
         }
-        if (ext & WPAD_CLASSIC_BUTTON_LEFT) pad->stick_x = -80;
-        if (ext & WPAD_CLASSIC_BUTTON_RIGHT) pad->stick_x = 80;
-        if (ext & WPAD_CLASSIC_BUTTON_DOWN) pad->stick_y = -80;
-        if (ext & WPAD_CLASSIC_BUTTON_UP) pad->stick_y = 80;
+        if (ext & WPAD_CLASSIC_BUTTON_LEFT) pad->button |= L_JPAD;
+        if (ext & WPAD_CLASSIC_BUTTON_RIGHT) pad->button |= R_JPAD;
+        if (ext & WPAD_CLASSIC_BUTTON_DOWN) pad->button |= D_JPAD;
+        if (ext & WPAD_CLASSIC_BUTTON_UP) pad->button |= U_JPAD;
     } else if (status.extensionType == WPAD_EXT_PRO_CONTROLLER) {
         uint32_t ext = status.pro.hold;
         stick = status.pro.leftStick;
@@ -172,10 +172,10 @@ static void read_wpad(OSContPad* pad) {
                 pad->button |= map[i].n64Button;
             }
         }
-        if (ext & WPAD_PRO_BUTTON_LEFT) pad->stick_x = -80;
-        if (ext & WPAD_PRO_BUTTON_RIGHT) pad->stick_x = 80;
-        if (ext & WPAD_PRO_BUTTON_DOWN) pad->stick_y = -80;
-        if (ext & WPAD_PRO_BUTTON_UP) pad->stick_y = 80;
+        if (ext & WPAD_PRO_BUTTON_LEFT) pad->button |= L_JPAD;
+        if (ext & WPAD_PRO_BUTTON_RIGHT) pad->button |= R_JPAD;
+        if (ext & WPAD_PRO_BUTTON_DOWN) pad->button |= D_JPAD;
+        if (ext & WPAD_PRO_BUTTON_UP) pad->button |= U_JPAD;
     }
 
     // If we didn't already get stick input from the gamepad
