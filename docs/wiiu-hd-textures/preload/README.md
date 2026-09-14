@@ -6,7 +6,8 @@
 checkout, the compiled `base.zip`, and an external texture-pack ZIP. It
 contains:
 
-- a global bundle for Mario, transformations, the HUD, and common events;
+- a global bundle for Mario, transformations, the HUD, common events, and
+  hardware-verified front-end resources;
 - one specific bundle for each of the 30 levels that has a `level.yaml` file;
 - separate bundles for the intro and menus, the ending, and conditional system
   resources;
@@ -23,14 +24,22 @@ specifies `generic`; `castle_inside/script.c` loads `common0` although its
 
 ## Event coverage
 
-The global preload bundle contains 321 textures and represents 16.36 MiB of
-RGBA8 memory:
+The generated portion of the global preload bundle contains 321 textures and
+represents 16.36 MiB of RGBA8 memory:
 
 - `group0`: Mario, metal/vanish/wing transformations, bubbles, walking and burn
   smoke, dust, ripples, splashes, and particles.
 - `common1`: coins, stars, caps, power meter, flames, explosions, doors, pipes,
   trees, and global objects.
 - `segment2`: HUD, fonts, and common interface resources.
+
+The generator then merges the 52 front-end paths listed in
+`tools/wiiu_preload_overrides.json`. These paths were observed as runtime cache
+misses during the Wii U hardware session identified in that file. Keeping the
+measured additions separate from source-derived dependencies makes the final
+table reproducible without treating all 179 conservative front-end candidates
+as startup requirements. The resulting global bundle contains 373 textures and
+represents 18.20 MiB of estimated RGBA8 memory.
 
 Level-specific groups cover local events. `group12`, used by Bowser, includes
 his 14 fire textures, the bomb, impact smoke, impact ring, and yellow sphere.
@@ -81,12 +90,16 @@ python tools/generate_wiiu_preload_manifests.py `
 
 The build consumes `src/pc/gfx/wiiu_level_preload_tables.inc.h` directly. The
 command above generates the manifest and the compiled table in one invocation.
+It loads `tools/wiiu_preload_overrides.json` by default; use `--overrides` only
+to validate an alternative versioned override file. Do not edit the generated
+header directly.
 The table can also be regenerated independently from an existing manifest with
 `--manifest-input`. The Wii U build neither includes nor parses the JSON files.
 
 ## Runtime policy
 
-With `precache false`, startup synchronously loads the global bundle and
+With `precache false`, startup synchronously loads the global bundle—including
+the verified intro, title, menu, and star-selector additions—and
 `LEVEL_CASTLE_GROUNDS` after GX2 initialization and before the first visible
 frame. Each subsequent world loads its specific bundle during its existing
 entry transition. No texture work is performed by the star selector because
