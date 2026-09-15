@@ -26,6 +26,11 @@
 #endif
 #include <PR/gbi.h>
 
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+#include "extras/options_menu.h"
+#include "gfx_gx2.h"
+#endif
+
 #include "config.h"
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
 #include "level_table.h"
@@ -1916,12 +1921,53 @@ static inline void *seg_addr(uintptr_t w1) {
 #define C0(pos, width) ((cmd->words.w0 >> (pos)) & ((1U << width) - 1))
 #define C1(pos, width) ((cmd->words.w1 >> (pos)) & ((1U << width) - 1))
 
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+static bool gfx_wiiu_skip_to_options_menu;
+#endif
+
 static void gfx_run_dl(Gfx* cmd) {
     //int dummy = 0;
     for (;;) {
         uint32_t opcode = cmd->words.w0 >> 24;
 
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+        if (gfx_wiiu_skip_to_options_menu) {
+            if (opcode == (uint8_t)G_ENDDL) {
+                return;
+            }
+            if (opcode == G_DL) {
+                Gfx *next = (Gfx *)seg_addr(cmd->words.w1);
+                if (C0(16, 1) == 0) {
+                    // Walk nested display lists while skipping draw work so
+                    // the tagged start of the options UI can still be found.
+                    gfx_run_dl(next);
+                    ++cmd;
+                } else {
+                    cmd = next;
+                }
+                continue;
+            }
+            if (!(opcode == (uint8_t)G_NOOP &&
+                  cmd->words.w1 == WIIU_OPTIONS_MENU_DL_TAG)) {
+                ++cmd;
+                continue;
+            }
+        }
+#endif
+
         switch (opcode) {
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+            case (uint8_t)G_NOOP:
+                if (cmd->words.w1 == WIIU_OPTIONS_MENU_DL_TAG) {
+                    if (gfx_wiiu_skip_to_options_menu) {
+                        gfx_wiiu_skip_to_options_menu = false;
+                    } else {
+                        gfx_flush();
+                        gfx_gx2_capture_options_background();
+                    }
+                }
+                break;
+#endif
             // RSP commands:
             case G_MTX:
 #ifdef F3DEX_GBI_2
@@ -2456,6 +2502,11 @@ void gfx_run(Gfx *commands) {
     gfx_vcutm_profile.run_begin_us = osGetTime();
 #endif
     gfx_sp_reset();
+
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+    gfx_wiiu_skip_to_options_menu =
+        gfx_gx2_prepare_options_frame(optmenu_open != 0);
+#endif
 
     if (!gfx_wapi->start_frame()) {
         dropped_frame = true;

@@ -79,6 +79,9 @@ void end_master_display_list(void);
 void render_init(void);
 void select_gfx_pool(void);
 void display_and_vsync(void);
+#if !defined(TARGET_N64) && defined(TARGET_WII_U)
+void display_menu_fps_counter(void);
+#endif
 
 #ifdef USE_SYSTEM_MALLOC
 Gfx **alloc_next_dl(void);

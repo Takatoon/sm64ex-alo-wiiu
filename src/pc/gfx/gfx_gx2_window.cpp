@@ -65,6 +65,10 @@ static GX2ColorBuffer   g_color_buffer;
 static void*            g_color_buffer_image_data = nullptr;
 static GX2DepthBuffer   g_depth_buffer;
 static void*            g_depth_buffer_image_data = nullptr;
+static GX2Surface       g_options_background_surface;
+static void*            g_options_background_image_data = nullptr;
+static bool             g_options_background_valid = false;
+static bool             g_restore_options_background = false;
 static MEMHeapHandle    g_mem1_heap_handle        = nullptr;
 static MEMHeapHandle    g_fg_heap_handle          = nullptr;
 
@@ -90,6 +94,9 @@ static void gfx_gx2_window_foreground_release_callback(void)
     }
     g_color_buffer_image_data = nullptr;
     g_depth_buffer_image_data = nullptr;
+    g_options_background_image_data = nullptr;
+    g_options_background_valid = false;
+    g_restore_options_background = false;
 }
 
 extern "C" void OSBlockThreadsOnExit(void);
@@ -261,7 +268,62 @@ static bool gfx_gx2_window_create_render_buffers(void)
     GX2InitDepthBufferRegs(&g_depth_buffer);
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU, g_depth_buffer_image_data,
                   g_depth_buffer.surface.imageSize);
+
+    // Preserve one clean copy of the paused world. Later menu frames restore
+    // it and execute only the options interface display-list suffix.
+    g_options_background_surface = g_color_buffer.surface;
+    g_options_background_image_data = MEMAllocFromFrmHeapEx(
+        g_mem1_heap_handle, g_options_background_surface.imageSize,
+        g_options_background_surface.alignment);
+    if (g_options_background_image_data)
+    {
+        g_options_background_surface.image = g_options_background_image_data;
+        GX2Invalidate(GX2_INVALIDATE_MODE_CPU,
+                      g_options_background_image_data,
+                      g_options_background_surface.imageSize);
+    }
+    else
+    {
+        WHBLogPrint("[options-cache] disabled: background allocation failed");
+    }
+    g_options_background_valid = false;
+    g_restore_options_background = false;
     return true;
+}
+
+extern "C" bool gfx_gx2_prepare_options_frame(bool menu_open)
+{
+    if (!menu_open)
+    {
+        g_options_background_valid = false;
+        g_restore_options_background = false;
+        return false;
+    }
+
+    g_restore_options_background = g_options_background_valid &&
+                                   g_options_background_image_data != nullptr;
+    return g_restore_options_background;
+}
+
+extern "C" void gfx_gx2_capture_options_background(void)
+{
+    if (!g_options_background_image_data || g_options_background_valid)
+        return;
+
+    // Finish the clean 3D prefix once and preserve it before the translucent
+    // menu is drawn into the main colour buffer.
+    gfx_gx2_flush_vbo_cache();
+    GX2Flush();
+    GX2DrawDone();
+    GX2CopySurface(&g_color_buffer.surface, 0, 0,
+                   &g_options_background_surface, 0, 0);
+    GX2DrawDone();
+    GX2SetContextState(g_context);
+    GX2SetColorBuffer(&g_color_buffer, GX2_RENDER_TARGET_0);
+    GX2SetDepthBuffer(&g_depth_buffer);
+    g_options_background_valid = true;
+    WHBLogPrintf("[options-cache] captured %ux%u",
+                 g_render_target_width, g_render_target_height);
 }
 
 static bool gfx_gx2_window_foreground_acquire_callback(void)
@@ -528,7 +590,13 @@ static bool gfx_gx2_window_apply_video_mode_change(void)
     {
         g_color_buffer_image_data = nullptr;
         g_depth_buffer_image_data = nullptr;
+        g_options_background_image_data = nullptr;
     }
+
+    // The cached scene uses the old viewport even when only the aspect ratio
+    // changes and the surface can be reused. Capture it again in either case.
+    g_options_background_valid = false;
+    g_restore_options_background = false;
 
     gfx_gx2_window_activate_mode(g_requested_mode);
 
@@ -588,18 +656,26 @@ static bool gfx_gx2_window_start_frame(void)
     if (!is_running)
         return false;
 
-    GX2ClearColor(
-        &g_color_buffer,
-        0.0f, 0.0f, 0.0f, 1.0f
-    );
+    if (g_restore_options_background)
+    {
+        GX2CopySurface(&g_options_background_surface, 0, 0,
+                       &g_color_buffer.surface, 0, 0);
+    }
+    else
+    {
+        GX2ClearColor(
+            &g_color_buffer,
+            0.0f, 0.0f, 0.0f, 1.0f
+        );
 
-    GX2ClearDepthStencilEx(
-        &g_depth_buffer,
-        g_depth_buffer.depthClear,
-        g_depth_buffer.stencilClear,
-        (GX2ClearFlags)(GX2_CLEAR_FLAGS_DEPTH |
-                        GX2_CLEAR_FLAGS_STENCIL)
-    );
+        GX2ClearDepthStencilEx(
+            &g_depth_buffer,
+            g_depth_buffer.depthClear,
+            g_depth_buffer.stencilClear,
+            (GX2ClearFlags)(GX2_CLEAR_FLAGS_DEPTH |
+                            GX2_CLEAR_FLAGS_STENCIL)
+        );
+    }
 
     GX2SetContextState(g_context);
 

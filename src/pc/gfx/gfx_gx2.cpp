@@ -55,7 +55,17 @@ static struct ShaderProgram shader_program_pool[64];
 static uint8_t shader_program_pool_size = 0;
 
 static struct ShaderProgram* current_shader_program = nullptr;
-static std::vector<float*> vbo_array;
+
+struct VboBlock
+{
+    uint8_t* data;
+    size_t capacity;
+    size_t used;
+};
+
+static std::vector<VboBlock> vbo_blocks;
+static size_t current_vbo_block = 0;
+static const size_t VBO_BLOCK_SIZE = 1024 * 1024;
 
 static std::vector<Texture> gx2_textures;
 static uint8_t current_tile = 0;
@@ -383,16 +393,38 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     if (!current_shader_program)
         return;
 
-    size_t idx = vbo_array.size();
-    vbo_array.resize(idx + 1);
-
     size_t vbo_len = sizeof(float) * buf_vbo_len;
-    vbo_array[idx] = static_cast<float*>(memalign(0x40, vbo_len));
+    VboBlock* block = nullptr;
 
-    float* new_vbo = vbo_array[idx];
+    while (current_vbo_block < vbo_blocks.size())
+    {
+        VboBlock& candidate = vbo_blocks[current_vbo_block];
+        size_t aligned_used = (candidate.used + 0x3F) & ~((size_t)0x3F);
+        if (aligned_used + vbo_len <= candidate.capacity)
+        {
+            candidate.used = aligned_used;
+            block = &candidate;
+            break;
+        }
+        current_vbo_block++;
+    }
+
+    if (!block)
+    {
+        size_t capacity = vbo_len > VBO_BLOCK_SIZE
+            ? (vbo_len + 0x3F) & ~((size_t)0x3F)
+            : VBO_BLOCK_SIZE;
+        uint8_t* data = static_cast<uint8_t*>(memalign(0x40, capacity));
+        if (!data)
+            return;
+        vbo_blocks.push_back({data, capacity, 0});
+        current_vbo_block = vbo_blocks.size() - 1;
+        block = &vbo_blocks[current_vbo_block];
+    }
+
+    float* new_vbo = reinterpret_cast<float*>(block->data + block->used);
     memcpy(new_vbo, buf_vbo, vbo_len);
-
-    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_vbo, vbo_len);
+    block->used += vbo_len;
 
     GX2SetAttribBuffer(0, vbo_len, sizeof(float) * current_shader_program->num_floats, new_vbo);
     GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
@@ -416,14 +448,29 @@ static void gfx_gx2_start_frame(void)
 
 static void gfx_gx2_end_frame(void) 
 {
+    // Flush each contiguous CPU VBO block once instead of invalidating the
+    // cache separately for every menu element and draw call.
+    gfx_gx2_flush_vbo_cache();
+}
+
+extern "C" void gfx_gx2_flush_vbo_cache(void)
+{
+    for (VboBlock& block : vbo_blocks)
+    {
+        if (block.used != 0)
+            GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER,
+                          block.data, block.used);
+    }
 }
 
 static void gfx_gx2_finish_render(void) 
 {
     // Wait until drawing is done
     GX2DrawDone();
-    // Free resources
-    gfx_gx2_free_vbo();
+    // The GPU has finished with the frame, so its VBO storage can be reused.
+    for (VboBlock& block : vbo_blocks)
+        block.used = 0;
+    current_vbo_block = 0;
 }
 
 static void gfx_gx2_shutdown(void) 
@@ -432,14 +479,17 @@ static void gfx_gx2_shutdown(void)
 
 extern "C" void gfx_gx2_free_vbo(void)
 {
-    for (uint32_t i = 0; i < vbo_array.size(); i++)
-        free(vbo_array[i]);
+    for (VboBlock& block : vbo_blocks)
+        free(block.data);
 
-    vbo_array.clear();
+    vbo_blocks.clear();
+    current_vbo_block = 0;
 }
 
 extern "C" void gfx_gx2_free(void)
 {
+    gfx_gx2_free_vbo();
+
     // Free our textures and shaders
     for (uint32_t i = 0; i < gx2_textures.size(); i++)
     {

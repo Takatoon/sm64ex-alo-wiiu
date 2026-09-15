@@ -21,6 +21,10 @@
 #include "segment_symbols.h"
 #include "rumble_init.h"
 
+#if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include <whb/log.h>
+#endif
+
 #ifdef TARGET_N64
 #include "boot/system_checks.h"
 #endif
@@ -40,6 +44,9 @@
 #ifdef EXT_DEBUG_MENU
 #include "extras/debug_menu.h"
 #endif
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+#include "extras/options_menu.h"
+#endif
 
 // First 3 controller slots
 struct Controller gControllers[3];
@@ -57,28 +64,78 @@ u8 *gGfxPoolEnd;
 struct GfxPool *gGfxPool;
 
 #ifndef TARGET_N64
-static void display_fps_counter(void) {
-    static OSTime lastTime;
-    OSTime currentTime;
-    f32 fps;
+static OSTime sFPSLastTime;
+#ifdef TARGET_WII_U
+static OSTime sMenuFPSLastTime;
+#endif
 
-    if (!configShowFPS) {
-        lastTime = 0;
-        return;
-    }
+static bool draw_fps_counter(OSTime *lastTime, s16 *drawnValue) {
+    OSTime currentTime = osGetTime();
 
-    currentTime = osGetTime();
-    if (lastTime != 0 && currentTime > lastTime) {
+    if (*lastTime != 0 && currentTime > *lastTime) {
 #ifdef HIGH_FPS_PC
         const f32 frameMultiplier = 2.0f;
 #else
         const f32 frameMultiplier = 1.0f;
 #endif
-        fps = frameMultiplier * 1000000.0f / (currentTime - lastTime);
-        print_text_fmt_int(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 184, "FPS %d", (s16) fps);
+        const f32 fps = frameMultiplier * 1000000.0f /
+                        (currentTime - *lastTime);
+        const s16 fpsValue = (s16) fps;
+        print_text_fmt_int(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 184,
+                           "FPS %d", fpsValue);
+        if (drawnValue != NULL) {
+            *drawnValue = fpsValue;
+        }
+        *lastTime = currentTime;
+        return true;
     }
-    lastTime = currentTime;
+    *lastTime = currentTime;
+    return false;
 }
+
+static void display_fps_counter(void) {
+    if (!configShowFPS) {
+        sFPSLastTime = 0;
+#ifdef TARGET_WII_U
+        sMenuFPSLastTime = 0;
+#endif
+        return;
+    }
+
+#if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
+    if (optmenu_open) {
+        // Do not leave the ordinary FPS label in the captured background.
+        sFPSLastTime = 0;
+        return;
+    }
+    sMenuFPSLastTime = 0;
+#endif
+
+    draw_fps_counter(&sFPSLastTime, NULL);
+}
+
+#ifdef TARGET_WII_U
+void display_menu_fps_counter(void) {
+    if (!configShowFPS) {
+        sMenuFPSLastTime = 0;
+        return;
+    }
+    s16 fpsValue = 0;
+    if (!draw_fps_counter(&sMenuFPSLastTime, &fpsValue)) {
+        return;
+    }
+    // The normal label pass already ran, so consume this label immediately to
+    // emit its commands after the cached-background boundary.
+    render_text_labels();
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    static u32 logFrames;
+    if (++logFrames >= 120) {
+        WHBLogPrintf("[menu-fps-overlay] emitted=1 value=%d", (int) fpsValue);
+        logFrames = 0;
+    }
+#endif
+}
+#endif
 #endif
 
 // OS Controllers

@@ -1,6 +1,8 @@
 #ifndef OPTIONS_MENU_H
 #define OPTIONS_MENU_H
 
+#define WIIU_OPTIONS_MENU_DL_TAG 0x574F5054u /* "WOPT" */
+
 #ifndef TARGET_N64
 #include <stdbool.h>
 #else

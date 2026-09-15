@@ -17,7 +17,10 @@ extern uint32_t g_render_offset_x;
 extern uint32_t g_render_offset_y;
 
 void gfx_gx2_free_vbo(void);
+void gfx_gx2_flush_vbo_cache(void);
 void gfx_gx2_free(void);
+bool gfx_gx2_prepare_options_frame(bool menu_open);
+void gfx_gx2_capture_options_background(void);
 
 #ifdef __cplusplus
 }

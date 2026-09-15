@@ -3117,8 +3117,17 @@ s16 render_pause_screen(void) {
     }
 #ifdef EXT_OPTIONS_MENU
     } else {
+#ifdef TARGET_WII_U
+        // The GX2 backend uses this boundary to cache the already-paused 3D
+        // scene while continuing to redraw the live options UI.
+        gDPNoOpTag(gDisplayListHead++, WIIU_OPTIONS_MENU_DL_TAG);
+#endif
         shade_screen();
         optmenu_draw();
+#ifdef TARGET_WII_U
+        // Keep the FPS counter live above the cached background.
+        display_menu_fps_counter();
+#endif
     }
     optmenu_check_buttons();
     optmenu_draw_prompt();
