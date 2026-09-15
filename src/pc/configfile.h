@@ -30,6 +30,23 @@ typedef struct {
 
 extern ConfigWindow configWindow;
 extern unsigned int configFiltering;
+#ifdef TARGET_WII_U
+enum WiiUInternalResolution {
+    WIIU_RESOLUTION_AUTO,
+    WIIU_RESOLUTION_720P,
+    WIIU_RESOLUTION_480P,
+    WIIU_RESOLUTION_COUNT,
+};
+
+enum WiiUAspectRatio {
+    WIIU_ASPECT_RATIO_16_9,
+    WIIU_ASPECT_RATIO_4_3,
+    WIIU_ASPECT_RATIO_COUNT,
+};
+
+extern unsigned int configWiiUInternalResolution;
+extern unsigned int configWiiUAspectRatio;
+#endif
 extern unsigned int configMasterVolume;
 extern unsigned int configMusicVolume;
 extern unsigned int configSfxVolume;

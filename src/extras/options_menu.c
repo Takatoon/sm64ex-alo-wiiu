@@ -100,6 +100,15 @@ static const u8 optsVideoStr[][SIZEOPTC(32)] = {
     { TEXT_OPT_RESETWND },
     { TEXT_OPT_VSYNC },
     { TEXT_OPT_APPLY },
+#ifdef TARGET_WII_U
+    { TEXT_OPT_INTRES },
+    { TEXT_OPT_RES_AUTO },
+    { TEXT_OPT_RES_720 },
+    { TEXT_OPT_RES_480 },
+    { TEXT_OPT_ASPECT },
+    { TEXT_OPT_ASPECT_169 },
+    { TEXT_OPT_ASPECT_43 },
+#endif
 };
 #endif
 
@@ -164,6 +173,17 @@ static const u8 *filterChoices[] = {
     optsVideoStr[2],
     optsVideoStr[3],
 };
+#ifdef TARGET_WII_U
+static const u8 *wiiuResolutionChoices[] = {
+    optsVideoStr[8],
+    optsVideoStr[9],
+    optsVideoStr[10],
+};
+static const u8 *wiiuAspectRatioChoices[] = {
+    optsVideoStr[12],
+    optsVideoStr[13],
+};
+#endif
 #endif
 
 /* button action functions */
@@ -258,6 +278,10 @@ static struct Option optsVideo[] = {
 #ifndef TARGET_PORT_CONSOLE
     DEF_OPT_TOGGLE( optsVideoStr[0], &configWindow.fullscreen ),
     DEF_OPT_TOGGLE( optsVideoStr[5], &configWindow.vsync ),
+#endif
+#ifdef TARGET_WII_U
+    DEF_OPT_CHOICE( optsVideoStr[7], &configWiiUInternalResolution, wiiuResolutionChoices ),
+    DEF_OPT_CHOICE( optsVideoStr[11], &configWiiUAspectRatio, wiiuAspectRatioChoices ),
 #endif
     DEF_OPT_CHOICE( optsVideoStr[1], &configFiltering, filterChoices ),
 #if !defined(TARGET_PORT_CONSOLE) && !defined(TARGET_ANDROID)

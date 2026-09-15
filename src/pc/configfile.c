@@ -62,6 +62,10 @@ ConfigWindow configWindow       = {
 };
 
 unsigned int configFiltering    = 1;          // 0=force nearest, 1=linear
+#ifdef TARGET_WII_U
+unsigned int configWiiUInternalResolution = WIIU_RESOLUTION_AUTO;
+unsigned int configWiiUAspectRatio = WIIU_ASPECT_RATIO_16_9;
+#endif
 unsigned int configMasterVolume = MAX_VOLUME; // 0 - MAX_VOLUME
 unsigned int configMusicVolume = MAX_VOLUME;
 unsigned int configSfxVolume = MAX_VOLUME;
@@ -149,6 +153,10 @@ static const struct ConfigOption options[] = {
     {.name = "vsync",                .type = CONFIG_TYPE_BOOL, .boolValue = &configWindow.vsync},
 #endif
     {.name = "texture_filtering",    .type = CONFIG_TYPE_UINT, .uintValue = &configFiltering},
+#ifdef TARGET_WII_U
+    {.name = "internal_resolution",  .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUInternalResolution},
+    {.name = "aspect_ratio",         .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUAspectRatio},
+#endif
     {.name = "master_volume",        .type = CONFIG_TYPE_UINT, .uintValue = &configMasterVolume},
     {.name = "music_volume",         .type = CONFIG_TYPE_UINT, .uintValue = &configMusicVolume},
     {.name = "sfx_volume",           .type = CONFIG_TYPE_UINT, .uintValue = &configSfxVolume},

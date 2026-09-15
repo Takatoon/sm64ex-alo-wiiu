@@ -341,13 +341,17 @@ static void gfx_gx2_set_zmode_decal(bool zmode_decal)
 
 static void gfx_gx2_set_viewport(int x, int y, int width, int height)
 {
-    GX2SetViewport(x, g_window_height - y - height, width, height, 0.0f, 1.0f);
+    GX2SetViewport(g_render_offset_x + x,
+                   g_render_offset_y + g_window_height - y - height,
+                   width, height, 0.0f, 1.0f);
     current_height = height;
 }
 
 static void gfx_gx2_set_scissor(int x, int y, int width, int height)
 {
-    GX2SetScissor(x, g_window_height - y - height, width, height);
+    GX2SetScissor(g_render_offset_x + x,
+                  g_render_offset_y + g_window_height - y - height,
+                  width, height);
 }
 
 static void gfx_gx2_set_use_alpha(bool use_alpha)
