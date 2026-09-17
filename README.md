@@ -1,26 +1,49 @@
-# sm64ex_alo
-Fork of [sm64pc/sm64ex](https://github.com/sm64pc/sm64ex) with additional features. 
+# Super Mario 64 Wii U (sm64ex-alo)
+
+This is a Wii U-focused fork of
+[AloUltraExt's sm64ex-alo](https://github.com/AloUltraExt/sm64ex-alo).
+It adds a Docker-based build workflow, external texture-pack support, and Wii U
+gameplay and display improvements. The original project's documentation is
+preserved below.
 
 ## Wii U fork
 
-This repository extends `sm64ex-alo` with a Wii U-focused build and runtime
-workflow. The original project documentation and feature list are preserved
-below.
+Builds are created from a user-supplied Super Mario 64 ROM; neither the ROM nor
+copyrighted game assets or HD texture packs are distributed here.
 
 ### Wii U changes
 
-* Improved external texture loading and preloading to reduce interruptions
-  while playing with HD texture packs.
-* Added a guided build tool that compiles the game and adjusts texture-pack
-  quality to help it run smoothly on Wii U.
-* Fixed **Save and Exit** after collecting a star so it returns directly to the
-  Wii U Menu.
-* Added WUHB packaging with custom titles and artwork, together with an
-  FTP-ready SD card layout.
-* Can keep configuration, save files, and mods together in the application
-  folder; the original SD card root layout remains available as an option.
-* Added an optional FPS counter under **Settings > HUD**, disabled by default.
+* Fixed external texture cache lookups so replacement textures resolve
+  correctly during full precaching.
+* Reduced ZIP texture-loading overhead by keeping an archive handle open while
+  preserving the priority of loose files and other texture packs.
+* Added selective texture preloading for startup screens and level transitions.
+  Textures not covered by the preload tables still load on demand.
+* Added a guided Docker build tool for the Wii U game, texture-pack conversion,
+  or both. It offers texture-size profiles, 30/60 FPS builds, and an FTP-ready
+  SD card output.
+* Packaged the game as a WUHB with configurable application name, title, icon,
+  and boot images. External-resource builds embed their base resources in the
+  WUHB; user texture packs go in `mods/` beside it.
+* Added an optional application-local layout for `sm64config.txt`, `saves/`,
+  and `mods/`. The previous SD-root layout remains available at build time.
+* Fixed **Save and Exit** after collecting a star to return directly to the Wii U
+  Menu.
+* Added **Settings > Video** choices for automatic, forced 720p, or forced
+  480p internal rendering, plus 16:9 or 4:3 aspect ratio. Changes can be
+  applied without restarting the game.
+* Reduced unnecessary rendering in the Wii U pause/options menu.
+* Added an optional **Settings > HUD > Show FPS** counter, off by default and
+  available in non-debug builds.
 * Adjusted face-button mappings for the Wii U GamePad and Wii U Pro Controller.
+  The Pro Controller and Wii Classic Controller D-pads now also work as the
+  N64 D-pad, including in the debug level selector.
+* Added a **Nonstop Stars** cheat that lets Mario remain in a level after
+  collecting a regular star; grand stars and Bowser keys retain their normal
+  behavior.
+* Added optional Wii U load-time profiling and a log analyzer for diagnosing
+  texture loads, level transitions, and frame-time stalls. Profiling is off in
+  normal builds.
 
 ### Requirements
 
@@ -32,10 +55,12 @@ below.
 
 ### Quick start
 
-Place the required user files under `user-assets/` as described in the
-[Wii U Docker guide](docs/wiiu-docker.md), then run:
+Clone this fork, place the required user files under `user-assets/` as described
+in the [Wii U Docker guide](docs/wiiu-docker.md), and run:
 
 ```bat
+git clone https://github.com/Takatoon/sm64ex-alo-wiiu.git
+cd sm64ex-alo-wiiu
 build-wiiu.cmd
 ```
 
@@ -56,9 +81,10 @@ SD:/wiiu/apps/<name>/
 └── mods/
 ```
 
-See the [build guide](docs/wiiu-docker.md) for the complete workflow and the
-[storage layout documentation](docs/wiiu-storage-layout.md) for runtime paths,
-embedded resources, and legacy compatibility.
+See the [build guide](docs/wiiu-docker.md) for the complete workflow, the
+[storage layout documentation](docs/wiiu-storage-layout.md) for runtime paths
+and legacy compatibility, and the
+[profiling guide](docs/wiiu-load-profiling.md) for optional measurements.
 
 ### Credits
 
@@ -68,6 +94,11 @@ the [SM64 decompilation project](https://github.com/n64decomp/sm64),
 [AboodXD](https://github.com/aboood40091). Please refer to the original
 projects and this repository's commit history for their respective authors and
 contributions.
+
+## Original sm64ex-alo documentation
+
+The following sections describe features and build instructions inherited from
+the upstream project. For this fork's Wii U workflow, use the guide above.
 
 ## Changes
  * N64 Building - Support for it was removed in sm64ex
