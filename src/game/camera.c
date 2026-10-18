@@ -2630,6 +2630,15 @@ void store_lakitu_cam_info_for_c_up(struct Camera *c) {
  * @see update_mario_inputs
  */
 s32 set_mode_c_up(struct Camera *c) {
+#if CAMERA_VANILLA_DEFINES
+    // set_camera_mode() refuses transitions in TTM outside. Do not arm the
+    // first-person input flag there: Mario would enter ACT_FIRST_PERSON while
+    // the camera stays radial, so mode_c_up_camera() cannot handle the exit.
+    if (gCurrLevelArea == AREA_TTM_OUTSIDE) {
+        play_sound_button_change_blocked();
+        return 0;
+    }
+#endif
     if (!(gCameraMovementFlags & CAM_MOVE_C_UP_MODE)) {
         gCameraMovementFlags |= CAM_MOVE_C_UP_MODE;
         store_lakitu_cam_info_for_c_up(c);
