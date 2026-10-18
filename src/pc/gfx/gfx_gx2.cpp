@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include <vector>
 
@@ -393,6 +394,38 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     if (!current_shader_program)
         return;
 
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    // Distinguish corrupt CPU geometry from visibility/cache issues on GX2.
+    // Large finite clip coordinates can be valid: do not impose a size cutoff.
+    static unsigned int invalid_batches = 0;
+    const size_t stride = current_shader_program->num_floats;
+    bool valid = stride >= 4 && buf_vbo_len % stride == 0 &&
+                 buf_vbo_len / stride == buf_vbo_num_tris * 3;
+    size_t bad_vertex = 0;
+    if (valid)
+    {
+        for (size_t offset = 0; offset < buf_vbo_len; offset += stride)
+        {
+            if (!isfinite(buf_vbo[offset]) || !isfinite(buf_vbo[offset + 1]) ||
+                !isfinite(buf_vbo[offset + 2]) || !isfinite(buf_vbo[offset + 3]))
+            {
+                valid = false;
+                bad_vertex = offset / stride;
+                break;
+            }
+        }
+    }
+    if (!valid)
+    {
+        if (invalid_batches++ < 8)
+            WHBLogPrintf("GX2_VERTEX_INPUT_INVALID frame=%u shader=%08x floats=%u stride=%u tris=%u vertex=%u",
+                         frame_count, current_shader_program->shader_id,
+                         (unsigned int)buf_vbo_len, (unsigned int)stride,
+                         (unsigned int)buf_vbo_num_tris, (unsigned int)bad_vertex);
+        return;
+    }
+#endif
+
     size_t vbo_len = sizeof(float) * buf_vbo_len;
     VboBlock* block = nullptr;
 
@@ -426,6 +459,10 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     memcpy(new_vbo, buf_vbo, vbo_len);
     block->used += vbo_len;
 
+    // Publish CPU writes and invalidate cached GPU attributes BEFORE queuing
+    // their draw. An end-of-frame invalidate is too late if GX2 has already
+    // submitted/consumed an earlier command-buffer segment.
+    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_vbo, vbo_len);
     GX2SetAttribBuffer(0, vbo_len, sizeof(float) * current_shader_program->num_floats, new_vbo);
     GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
 }
@@ -435,6 +472,7 @@ static void gfx_gx2_get_framebuffer(uint16_t *buffer) {
 
 static void gfx_gx2_init(void) 
 {
+    WHBLogPrint("GX2_VBO_COHERENCY mode=before_draw");
 }
 
 static void gfx_gx2_on_resize(void) 
@@ -448,8 +486,8 @@ static void gfx_gx2_start_frame(void)
 
 static void gfx_gx2_end_frame(void) 
 {
-    // Flush each contiguous CPU VBO block once instead of invalidating the
-    // cache separately for every menu element and draw call.
+    // Retain the frame-boundary flush as well; correctness now relies on the
+    // per-draw publication above, not on commands staying pending until here.
     gfx_gx2_flush_vbo_cache();
 }
 
@@ -467,7 +505,7 @@ static void gfx_gx2_finish_render(void)
 {
     // Wait until drawing is done
     GX2DrawDone();
-    // The GPU has finished with the frame, so its VBO storage can be reused.
+    // The GPU is finished with the frame, so its VBO storage can be reused.
     for (VboBlock& block : vbo_blocks)
         block.used = 0;
     current_vbo_block = 0;
