@@ -238,7 +238,8 @@ static int generatePixelShader(GX2PixelShader *psh, struct CCFeatures *cc_featur
         append_formula(&cur_buf, cc_features->c, cc_features->do_single[1], cc_features->do_multiply[1], cc_features->do_mix[1], true);
     }
 
-    if (cc_features->opt_texture_edge && cc_features->opt_alpha) {
+    const bool uses_discard = cc_features->opt_texture_edge && cc_features->opt_alpha;
+    if (uses_discard) {
         ADD_INSTR(
             /* if (texel.a > 0.3) texel.a = 1.0; else discard; */
             ALU_KILLGT(__, _x, ALU_SRC_LITERAL, _x, _R1, _w),
@@ -340,7 +341,8 @@ static int generatePixelShader(GX2PixelShader *psh, struct CCFeatures *cc_featur
     psh->regs.cb_shader_mask = 0xf; // output0_enable
     psh->regs.cb_shader_control = 1; // rt0_enable
     psh->regs.db_shader_control = (1 << 4) // z_order
-        | (1 << 6); // kill_enable
+        // Advertise discard only when this program actually emits ALU_KILLGT.
+        | (uses_discard ? (1 << 6) : 0); // kill_enable
     
     // program
     psh->size = (tex_offset + (num_textures * 2)) * sizeof(uint64_t);

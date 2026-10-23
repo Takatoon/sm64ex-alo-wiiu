@@ -38,6 +38,7 @@ static uint32_t g_render_target_width = 0;
 static uint32_t g_render_target_height = 0;
 
 static bool is_running = false;
+static bool g_procui_initialized;
 
 struct WiiUVideoMode
 {
@@ -76,8 +77,12 @@ static void gfx_gx2_window_foreground_release_callback(void)
 {
     //WHBLogPrint("To release foreground");
 
-    if (is_running)
-        ProcUIDrawDoneRelease();
+    // Drain before relinquishing foreground-only heaps and GX2 access.
+    if (gfx_gx2_gpu_available())
+    {
+        GX2DrawDone();
+        gfx_gx2_set_gpu_available(false);
+    }
 
     if (g_fg_heap_handle)
     {
@@ -97,6 +102,8 @@ static void gfx_gx2_window_foreground_release_callback(void)
     g_options_background_image_data = nullptr;
     g_options_background_valid = false;
     g_restore_options_background = false;
+    if (is_running)
+        ProcUIDrawDoneRelease();
 }
 
 extern "C" void OSBlockThreadsOnExit(void);
@@ -105,34 +112,40 @@ extern "C" void KPADShutdown();
 
 static void gfx_gx2_window_exit_callback(void)
 {
-    //WHBLogPrint("Exit callback");
     is_running = false;
-
     game_deinit();
 
-    gfx_gx2_free_vbo();
+    // Exit may follow foreground release. Discard pending CPU batches and
+    // retire GPU resources while their owning APIs are still available.
+    gfx_wiiu_shutdown_texture_cache();
     gfx_gx2_free();
+    if (gfx_gx2_gpu_available())
+    {
+        GX2Shutdown();
+        gfx_gx2_set_gpu_available(false);
+    }
 
     KPADShutdown();
     AXQuit();
-
+    gfx_gx2_window_foreground_release_callback();
     if (g_cmd_list)
     {
         MEMFreeToDefaultHeap(g_cmd_list);
         g_cmd_list = nullptr;
     }
-
     if (g_context)
     {
         MEMFreeToDefaultHeap(g_context);
         g_context = nullptr;
     }
-
-    gfx_gx2_window_foreground_release_callback();
-
+    // No GX2 operation may follow ProcUI shutdown.
+    if (g_procui_initialized)
+    {
+        ProcUIShutdown();
+        g_procui_initialized = false;
+    }
     WHBLogCafeDeinit();
     WHBLogUdpDeinit();
-
     OSBlockThreadsOnExit();
     _Exit(-1);
 }
@@ -328,6 +341,7 @@ extern "C" void gfx_gx2_capture_options_background(void)
 
 static bool gfx_gx2_window_foreground_acquire_callback(void)
 {
+    gfx_gx2_set_gpu_available(true);
     //WHBLogPrint("Acquiring foreground");
 
     // Get the MEM1 heap and Foreground Bucket heap handles
@@ -515,6 +529,7 @@ static void gfx_gx2_window_init(UNUSED const char*)
 
     // Initialize GX2
     GX2Init(init_attribs);
+    gfx_gx2_set_gpu_available(true);
 
     // Create TV and DRC scan, color and depth buffers
     if (!gfx_gx2_window_foreground_acquire_callback())
@@ -556,6 +571,7 @@ static void gfx_gx2_window_init(UNUSED const char*)
 
     // Initialize ProcUI
     ProcUIInit(&OSSavesDone_ReadyToRelease);
+    g_procui_initialized = true;
 
     is_running = true;
 }
@@ -646,7 +662,6 @@ static void gfx_gx2_window_handle_events(void)
          status == PROCUI_STATUS_IN_FOREGROUND &&
          !gfx_gx2_window_foreground_acquire_callback()))
     {
-        ProcUIShutdown();
         gfx_gx2_window_exit_callback();
     }
 }
@@ -752,7 +767,6 @@ static void gfx_gx2_window_swap_buffers_end(void)
 
     if (!gfx_gx2_window_apply_video_mode_change())
     {
-        ProcUIShutdown();
         gfx_gx2_window_exit_callback();
     }
 }

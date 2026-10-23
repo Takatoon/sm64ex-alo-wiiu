@@ -176,6 +176,9 @@ void game_deinit(void) {
     discord_shutdown();
 #endif
     configfile_save(configfile_name());
+#ifdef TARGET_WII_U
+    audio_shutdown();
+#endif
 #if defined(TARGET_SWITCH) || !defined(TARGET_PORT_CONSOLE)
     controller_shutdown();
     audio_shutdown();
