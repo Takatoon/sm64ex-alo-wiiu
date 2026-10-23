@@ -41,6 +41,9 @@
 #include "gfx_window_manager_api.h"
 #include "gfx_rendering_api.h"
 #include "gfx_screen_config.h"
+#ifdef TARGET_WII_U
+#include "gfx_gx2.h"
+#endif
 
 #ifdef TARGET_N3DS
 #include "gfx_3ds.h"
@@ -112,6 +115,9 @@ struct TextureHashmapNode {
     bool linear_filter;
 
     uint32_t checksum;
+#ifdef TARGET_WII_U
+    bool texture_id_initialized;
+#endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
     // Only names created by the preloader are owned by the cache.
     bool owns_texture_addr;
@@ -122,6 +128,9 @@ static struct {
     struct TextureHashmapNode pool[MAX_CACHED_TEXTURES];
     uint32_t pool_pos;
 } gfx_texture_cache;
+#ifdef TARGET_WII_U
+static uint32_t gfx_texture_cache_generation;
+#endif
 
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
 static bool gfx_preload_global_loaded;
@@ -432,13 +441,47 @@ static struct ColorCombiner *gfx_lookup_or_create_color_combiner(uint32_t cc_id)
         }
     }
     gfx_flush();
+#ifdef TARGET_WII_U
+    if (color_combiner_pool_size == sizeof(color_combiner_pool) / sizeof(color_combiner_pool[0]))
+        sys_fatal("GX2 color combiner pool exhausted (64)");
+#endif
     struct ColorCombiner *comb = &color_combiner_pool[color_combiner_pool_size++];
     gfx_generate_cc(comb, cc_id);
     return prev_combiner = comb;
 }
 
-static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, const uint8_t *orig_addr, uint32_t fmt, uint32_t siz, const uint8_t *palette, uint32_t checksum) {
+#ifdef TARGET_WII_U
+static void gfx_wiiu_reset_texture_cache(bool submit_pending) {
+    if (submit_pending) {
+        /* Runtime eviction must submit pending triangles before retiring. */
+        gfx_flush();
+    } else {
+        /* Exit can follow foreground release. Never issue a draw from here. */
+        buf_vbo_len = buf_vbo_num_tris = 0;
+    }
+    gfx_gx2_reset_texture_storage();
+    for (uint32_t i = 0; i < gfx_texture_cache.pool_pos; ++i) {
+#ifdef EXTERNAL_DATA
+        if (gfx_texture_cache.pool[i].owns_texture_addr)
+            free((void *)gfx_texture_cache.pool[i].texture_addr);
+        gfx_texture_cache.pool[i].owns_texture_addr = false;
+#endif
+        gfx_texture_cache.pool[i].texture_addr = NULL;
+    }
+#ifdef EXTERNAL_DATA
+    gfx_preload_global_loaded = false;
+#endif
+    memset(gfx_texture_cache.hashmap, 0, sizeof(gfx_texture_cache.hashmap));
+    gfx_texture_cache.pool_pos = 0;
+    rendering_state.textures[0] = rendering_state.textures[1] = NULL;
+    rdp.textures_changed[0] = rdp.textures_changed[1] = true;
+    gfx_texture_cache_generation++;
+}
+void gfx_wiiu_clear_texture_cache(void) { gfx_wiiu_reset_texture_cache(true); }
+void gfx_wiiu_shutdown_texture_cache(void) { gfx_wiiu_reset_texture_cache(false); }
+#endif
 
+static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, const uint8_t *orig_addr, uint32_t fmt, uint32_t siz, const uint8_t *palette, uint32_t checksum) {
     #ifdef EXTERNAL_DATA // hash and compare the data (i.e. the texture name) itself
     size_t hash = string_hash(orig_addr);
     #define CMPADDR(x, y) (x && !sys_strcasecmp((const char *)x, (const char *)y))
@@ -461,30 +504,35 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
         ) {
             gfx_rapi->select_texture(tile, (*node)->texture_id);
             *n = *node;
+
             return true;
         }
         node = &(*node)->next;
     }
+
     if (gfx_texture_cache.pool_pos == sizeof(gfx_texture_cache.pool) / sizeof(struct TextureHashmapNode)) {
         // Pool is full. We just invalidate everything and start over.
-#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U)
-        for (uint32_t i = 0; i < gfx_texture_cache.pool_pos; ++i) {
-            if (gfx_texture_cache.pool[i].owns_texture_addr) {
-                free((void *) gfx_texture_cache.pool[i].texture_addr);
-                gfx_texture_cache.pool[i].owns_texture_addr = false;
-            }
-        }
-        gfx_preload_global_loaded = false;
-#endif
+#ifdef TARGET_WII_U
+        gfx_wiiu_clear_texture_cache();
+#else
         memset(gfx_texture_cache.hashmap, 0, sizeof(gfx_texture_cache.hashmap));
         gfx_texture_cache.pool_pos = 0;
+#endif
         node = &gfx_texture_cache.hashmap[hash];
         // puts("Clearing texture cache");
     }
     *node = &gfx_texture_cache.pool[gfx_texture_cache.pool_pos++];
+#ifdef TARGET_WII_U
+    if (!(*node)->texture_id_initialized) {
+        (*node)->texture_id = gfx_rapi->new_texture();
+        (*node)->texture_id_initialized = true;
+    }
+#else
     if ((*node)->texture_addr == NULL) {
         (*node)->texture_id = gfx_rapi->new_texture();
     }
+#endif
+
     gfx_rapi->select_texture(tile, (*node)->texture_id);
     gfx_rapi->set_sampler_parameters(tile, false, 0, 0);
     (*node)->cms = 0;
@@ -811,7 +859,6 @@ static inline void load_texture(const char *fullpath) {
     gfx_rapi->upload_texture(missing_texture, MISSING_W, MISSING_H);
 }
 
-
 // this is taken straight from n64graphics
 static bool texname_to_texformat(const char *name, u8 *fmt, u8 *siz) {
     static const struct {
@@ -876,6 +923,7 @@ static void preload_texture_path(const char *path) {
     assert(owned_name);
 
     struct TextureHashmapNode *n;
+    gfx_flush();
     if (!gfx_texture_cache_lookup(0, &n, (const uint8_t *) owned_name, fmt, siz, 0, 0)) {
         n->owns_texture_addr = true;
         load_texture(path);
@@ -884,6 +932,8 @@ static void preload_texture_path(const char *path) {
         // cache changes between the read-only lookup and insertion.
         free(owned_name);
     }
+    rendering_state.textures[0] = NULL;
+    rdp.textures_changed[0] = true;
 }
 
 // Adapter used by the legacy full-pack fs_walk() precache.
@@ -1366,6 +1416,10 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     bool used_textures[2];
     gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
 
+#ifdef TARGET_WII_U
+retry_texture_bindings:;
+    uint32_t texture_generation = gfx_texture_cache_generation;
+#endif
     for (int i = 0; i < 2; i++) {
         if (used_textures[i]) {
             if (rdp.textures_changed[i]) {
@@ -1373,6 +1427,9 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
                 import_texture(i);
                 rdp.textures_changed[i] = false;
             }
+#ifdef TARGET_WII_U
+            if (rendering_state.textures[i] == NULL) return;
+#endif
             bool linear_filter = configFiltering && ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT);
             if (linear_filter != rendering_state.textures[i]->linear_filter || rdp.texture_tile.cms != rendering_state.textures[i]->cms || rdp.texture_tile.cmt != rendering_state.textures[i]->cmt) {
                 gfx_flush();
@@ -1383,6 +1440,11 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
             }
         }
     }
+#ifdef TARGET_WII_U
+    /* Tile 1 may trigger rollover after tile 0 was bound. Reimport both from
+     * the invalidation flags before emitting a triangle with reused slots. */
+    if (texture_generation != gfx_texture_cache_generation) goto retry_texture_bindings;
+#endif
 
     bool use_texture = used_textures[0] || used_textures[1];
     uint32_t tex_width = (rdp.texture_tile.lrs - rdp.texture_tile.uls + 4) / 4;

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <math.h>
 
 #include <vector>
@@ -30,6 +31,7 @@
 
 #include "gfx_cc.h"
 #include "gfx_rendering_api.h"
+#include "wiiu_texture_image.h"
 
 struct ShaderProgram 
 {
@@ -71,6 +73,40 @@ static const size_t VBO_BLOCK_SIZE = 1024 * 1024;
 static std::vector<Texture> gx2_textures;
 static uint8_t current_tile = 0;
 static uint32_t current_texture_ids[2];
+static size_t texture_images;
+static bool gpu_available;
+
+extern "C" void gfx_gx2_set_gpu_available(bool available) { gpu_available = available; }
+extern "C" bool gfx_gx2_gpu_available(void) { return gpu_available; }
+
+static void gfx_gx2_reclaim_barrier(void)
+{
+    if (!gpu_available) return;
+
+    GX2DrawDone();
+}
+
+/* Caller guarantees that queued GPU work no longer references this image. */
+static void gfx_gx2_release_image(Texture& texture)
+{
+    if (texture.texture_uploaded)
+    {
+        texture_images--;
+        free(texture.texture.surface.image);
+    }
+    texture.texture = {};
+    texture.texture_uploaded = false;
+}
+
+extern "C" void gfx_gx2_reset_texture_storage(void)
+{
+    if (texture_images) gfx_gx2_reclaim_barrier();
+    for (Texture& texture : gx2_textures)
+    {
+        gfx_gx2_release_image(texture);
+        texture.sampler_set = false;
+    }
+}
 
 static uint32_t frame_count = 0;
 static uint32_t current_height = 0;
@@ -151,9 +187,12 @@ static struct ShaderProgram* gfx_gx2_create_and_load_new_shader(uint32_t shader_
     struct CCFeatures cc_features;
     gfx_cc_get_features(shader_id, &cc_features);
 
-    struct ShaderProgram* prg = &shader_program_pool[shader_program_pool_size++];
-
-    const uint8_t *shader_wiiu;
+    if (shader_program_pool_size == sizeof(shader_program_pool) / sizeof(shader_program_pool[0]))
+    {
+        WHBLogPrint("GX2 shader pool exhausted (64); refusing out-of-bounds allocation");
+        return (current_shader_program = nullptr);
+    }
+    struct ShaderProgram* prg = &shader_program_pool[shader_program_pool_size];
 
     if (gx2GenerateShaderGroup(&prg->group, &cc_features) != 0)
     {
@@ -171,15 +210,15 @@ static struct ShaderProgram* gfx_gx2_create_and_load_new_shader(uint32_t shader_
     prg->used_textures[0] = cc_features.used_textures[0];
     prg->used_textures[1] = cc_features.used_textures[1];
 
-    gfx_gx2_load_shader(prg);
-
-    WHBLogPrintf("Loaded shader");
-
     prg->window_params_offset = GX2GetPixelUniformVarOffset(&prg->group.pixelShader, "window_params");
     prg->samplers_location[0] = GX2GetPixelSamplerVarLocation(&prg->group.pixelShader, "uTex0");
     prg->samplers_location[1] = GX2GetPixelSamplerVarLocation(&prg->group.pixelShader, "uTex1");
-    
+
     prg->used_noise = cc_features.opt_alpha && cc_features.opt_noise;
+    shader_program_pool_size++;
+
+    // Uniform locations/noise flags must be valid on the very first bind.
+    gfx_gx2_load_shader(prg);
 
     WHBLogPrint("Initiated Shader.");
 
@@ -228,7 +267,7 @@ static void gfx_gx2_select_texture(int tile, uint32_t texture_id)
     current_tile = tile;
     current_texture_ids[tile] = texture_id;
 
-    if (current_shader_program)
+    if (current_shader_program && current_shader_program->used_textures[tile])
     {
         Texture& texture = gx2_textures[texture_id];
         if (texture.texture_uploaded)
@@ -238,15 +277,17 @@ static void gfx_gx2_select_texture(int tile, uint32_t texture_id)
     }
 }
 
-static void gfx_gx2_upload_texture(const uint8_t* rgba32_buf, int width, int height)
+extern "C" bool gfx_gx2_upload_resource(uint32_t texture_id, const WiiUTextureImage *image)
 {
-    int tile = current_tile;
-    GX2Texture& texture = gx2_textures[current_texture_ids[tile]].texture;
+    if (!image || texture_id >= gx2_textures.size() || !image->width || !image->height ||
+        image->width > 8192 || image->height > 8192 || image->format != WIIU_TEXTURE_RGBA8)
+        return false;
+    GX2Texture texture = {};
 
     texture.surface.use       = GX2_SURFACE_USE_TEXTURE;
     texture.surface.dim       = GX2_SURFACE_DIM_TEXTURE_2D;
-    texture.surface.width     = width;
-    texture.surface.height    = height;
+    texture.surface.width     = image->width;
+    texture.surface.height    = image->height;
     texture.surface.depth     = 1;
     texture.surface.mipLevels = 1;
     texture.surface.format    = GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8;
@@ -273,25 +314,52 @@ static void gfx_gx2_upload_texture(const uint8_t* rgba32_buf, int width, int hei
         texture.regs[i] = 0;
 
     GX2CalcSurfaceSizeAndAlignment(&texture.surface);
-    GX2InitTextureRegs(&texture);
 
     texture.surface.image = memalign(texture.surface.alignment, texture.surface.imageSize);
+    if (!texture.surface.image)
+    {
+        return false;
+    }
+    if (!wiiu_texture_copy_rows(texture.surface.image, texture.surface.imageSize,
+                                (size_t)texture.surface.pitch * 4, image))
+    {
+        free(texture.surface.image);
+        return false;
+    }
+    // This is CPU linear storage: copy with the actual GX2 pitch and publish
+    // it before sampling. No asynchronous GX2CopySurface borrows the PNG data.
+    GX2InitTextureRegs(&texture);
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, texture.surface.image, texture.surface.imageSize);
 
-    GX2Surface surf;
-    surf = texture.surface;
-    surf.tileMode = GX2_TILE_MODE_LINEAR_SPECIAL;
-    surf.image = (void*)rgba32_buf;
-    GX2CalcSurfaceSizeAndAlignment(&surf);
-    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_TEXTURE, (void*)rgba32_buf, surf.imageSize);
-    GX2CopySurface(&surf, 0, 0, &texture.surface, 0, 0);
+    Texture& resident = gx2_textures[texture_id];
+    if (resident.texture_uploaded)
+        gfx_gx2_reclaim_barrier();
+    gfx_gx2_release_image(resident);
+    resident.texture = texture;
+    resident.texture_uploaded = true;
+
+    texture_images++;
 
     if (current_shader_program)
-        GX2SetPixelTexture(&texture, current_shader_program->samplers_location[tile]);
+        for (int tile = 0; tile < 2; ++tile)
+            if (current_texture_ids[tile] == texture_id && current_shader_program->used_textures[tile])
+                GX2SetPixelTexture(&resident.texture, current_shader_program->samplers_location[tile]);
 
-    gx2_textures[current_texture_ids[tile]].texture_uploaded = true;
+    return true;
+}
 
-    //WHBLogPrint("Texture set.");
+static void gfx_gx2_upload_texture(const uint8_t* rgba32_buf, int width, int height)
+{
+    if (width <= 0 || height <= 0 || width > 8192 || height > 8192)
+        return;
+    const WiiUTextureImage image = {rgba32_buf, (size_t)width * height * 4,
+                                    (size_t)width * 4, (uint32_t)width, (uint32_t)height,
+                                    WIIU_TEXTURE_RGBA8};
+    if (!gfx_gx2_upload_resource(current_texture_ids[current_tile], &image))
+    {
+        WHBLogPrintf("GX2 texture upload failed: id=%u %dx%d", current_texture_ids[current_tile], width, height);
+        abort(); // Do not sample an uninitialized or stale texture after OOM.
+    }
 }
 
 static GX2TexClampMode gfx_cm_to_gx2(uint32_t val)
@@ -312,7 +380,7 @@ static void gfx_gx2_set_sampler_parameters(int tile, bool linear_filter, uint32_
     GX2InitSampler(sampler, GX2_TEX_CLAMP_MODE_CLAMP, linear_filter ? GX2_TEX_XY_FILTER_MODE_LINEAR : GX2_TEX_XY_FILTER_MODE_POINT);
     GX2InitSamplerClamping(sampler, gfx_cm_to_gx2(cms), gfx_cm_to_gx2(cmt), GX2_TEX_CLAMP_MODE_WRAP);
 
-    if (current_shader_program)
+    if (current_shader_program && current_shader_program->used_textures[tile])
         GX2SetPixelSampler(sampler, current_shader_program->samplers_location[tile]);
 
     gx2_textures[current_texture_ids[tile]].sampler_set = true;
@@ -526,14 +594,16 @@ extern "C" void gfx_gx2_free_vbo(void)
 
 extern "C" void gfx_gx2_free(void)
 {
+    // All texture, VBO and shader storage may still be referenced by GPU work.
+    if (texture_images || !vbo_blocks.empty() || shader_program_pool_size)
+        gfx_gx2_reclaim_barrier();
     gfx_gx2_free_vbo();
 
     // Free our textures and shaders
     for (uint32_t i = 0; i < gx2_textures.size(); i++)
     {
         Texture& texture = gx2_textures[i];
-        if (texture.texture_uploaded)
-            free(texture.texture.surface.image);
+        gfx_gx2_release_image(texture);
     }
 
     for (uint32_t i = 0; i < shader_program_pool_size; i++)
@@ -541,6 +611,7 @@ extern "C" void gfx_gx2_free(void)
 
     gx2_textures.clear();
     shader_program_pool_size = 0;
+    current_shader_program = nullptr;
 }
 
 struct GfxRenderingAPI gfx_gx2_api = {
