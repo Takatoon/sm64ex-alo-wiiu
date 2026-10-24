@@ -6,12 +6,12 @@ static uintptr_t resolver(unsigned index) {
     return index<=10||(index>=12&&index<=15)||(index>=36&&index<=49&&index!=46)?0x1000+index:0;
 }
 int main(int argc,char **argv) {
-    if(argc!=2&&argc!=3)return 1;
+    if(argc<2||argc>4)return 1;
     std::ifstream file(argv[1],std::ios::binary);
     std::vector<uint8_t> data((std::istreambuf_iterator<char>(file)),{});
     std::vector<int> hierarchy;
-    if(argc==3){std::ifstream expected(argv[2]);int parent;while(expected>>parent)hierarchy.push_back(parent);}
-    std::string error;auto model=dynos::load(data.data(),data.size(),"test","mario",resolver,error,argc==3?&hierarchy:nullptr);
+    if(argc>=3){std::ifstream expected(argv[2]);int parent;while(expected>>parent)hierarchy.push_back(parent);}
+    std::string error;auto model=dynos::load(data.data(),data.size(),"test",argc==4?argv[3]:"mario",resolver,error,argc>=3?&hierarchy:nullptr,argc==4);
     if(!model){std::cerr<<error<<"\n";return 2;}
     // The command opcode must occupy the first byte in native memory on both
     // little-endian hosts and the big-endian PPC build.

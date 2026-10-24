@@ -8,6 +8,10 @@ extern "C" {
 #include "pc/fs/fs.h"
 #include "pc/configfile.h"
 extern const GeoLayout toad_geo[]={0};
+extern const GeoLayout black_bobomb_geo[]={1};
+static const Animation walk={0,0,0,0,8,3,nullptr,nullptr,0};
+static const Animation missing={0,0,0,0,12,3,nullptr,nullptr,0};
+extern const Animation *const bobomb_seg8_anims_0802396C[]={&walk,&missing,nullptr};
 unsigned int configDynosModel=0;
 MarioBodyState gBodyStates[2];
 MarioState *gMarioState=nullptr;
@@ -48,6 +52,15 @@ int main(int argc,char **argv) {
     dynos_clear_npc_bindings();assert(dynos_npc_graph(&root)==&root);
     dynos_bind_model(42,toad_geo,&root);assert(dynos_npc_graph(&root)==replacement);
     dynos_bind_model(42,nullptr,&a);assert(dynos_npc_graph(&root)==&root);
+    dynos_bind_model(43,black_bobomb_geo,&root);
+    const Animation *alternate=nullptr;
+    assert(dynos_npc_graph_with_animation(&root,&walk,&alternate)!=&root);
+    assert(alternate&&alternate->unusedBoneCount==4&&alternate->loopEnd==4);
+    assert(walk.loopEnd==8&&walk.unusedBoneCount==3);
+    assert(dynos_npc_graph_with_animation(&root,&missing,&alternate)==&root&&alternate==nullptr);
+    assert(dynos_npc_graph_with_animation(&root,nullptr,&alternate)==&root);
+    dynos_clear_npc_bindings();
+    assert(dynos_npc_graph_with_animation(&root,&walk,&alternate)==&root);
     dynos_request_player_step(1);dynos_update();assert(dynos_player_choice==1&&configDynosModel!=0&&saves==1);
     dynos_update();assert(saves==1);
     dynos_request_player_step(-1);dynos_update();assert(dynos_player_choice==0&&configDynosModel==0&&saves==2);

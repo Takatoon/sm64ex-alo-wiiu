@@ -1,4 +1,4 @@
-# Optional DynOS player packs on Wii U
+# Optional DynOS model packs on Wii U
 
 This implementation starts from the public Takatoon main commit
 `ec4820f7f99506a580948b40e1de1ae4290918f3`. It does not depend on the local
@@ -71,11 +71,13 @@ renderer; experimental DDS/GPU profiling changes are not included here.
   and character identities are not interpreted (a Yoshi in a Waluigi slot still
   inherits that slot's default palette/name).
 
-Embedded animation tables are read/skipped, not installed. There is no Lua,
+Player animation tables remain unused. Supported custom NPC hierarchies can
+use embedded animation tables as described below. There is no Lua,
 Character Select execution, new actions, custom voices, runtime C-source
 compiler or custom actions. Named actor replacements, including supported
-NPCs and native cap actors, use the original actor animations. Newer raw/external
-texture records, unsupported callbacks/commands and a different animation
+NPCs and native cap actors, normally use the original actor animations; the
+basic custom NPC path below uses validated embedded animations for drawing. Newer raw/external
+texture records, unsupported callbacks/commands and an unsupported animation
 hierarchy are rejected. F32VTX decimal coordinates are decoded from IEEE754
 little-endian bytes and rounded to the nearest native signed 16-bit position
 (half values away from zero, at most half a game unit error per axis). The
@@ -158,7 +160,7 @@ Capture `DYNOS_INIT`, `DYNOS_LOADED` or `DYNOS_REJECT` messages if a pack is
 missing or rejected. Hardware appearance, texture upload and performance
 validation remain pending.
 
-The complete public-base regression suite passes all 27 tests. Modified core
+The complete public-base regression suite passes all 31 tests. Modified core
 translation units also compile for Wii U with DYNOS=0. Bash syntax and Git
 whitespace checks pass. The test distribution includes two unchanged VC21
 BINs (Mario and Luigi) and the original Sunshine player BIN; it includes no large texture mod.
@@ -226,7 +228,7 @@ after level unload, model-ID reuse and shortcut selection/persistence. Native
 graph tests cover switches, LODs, empty shadow states and cycles. Platform
 services and graph allocation are stubbed in the runtime test; Wii U visuals,
 NPC cutscenes and controller hardware still require console verification.
-Logs: `DYNOS_INIT version=2`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
+Logs: `DYNOS_INIT version=3`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
 `DYNOS_PLAYER_SHORTCUT`. The TCP log receiver is not stopped by this feature.
 
 With DynOS enabled, Wii Remote Minus is reserved for the model modifier rather than the legacy N64 L binding.
@@ -262,16 +264,16 @@ the wrapper calls the native hand selector before recording the result.
 ## SwagSkeleton95 Replacements compatibility audit
 
 The locally supplied v1.0 ZIP was inspected on 2026-10-24. It contains 67 BINs;
-57 pass the current reader against the native actor animation hierarchies.
+62 pass the reader with basic custom NPC animation support enabled.
 Reader acceptance is not a substitute for visual verification on Wii U.
 
 | Actor | Native joints | Pack joints | Current limitation |
 | --- | ---: | ---: | --- |
-| black_bobomb_geo | 13 | 14 | Additional joint |
-| bobomb_buddy_geo | 13 | 14 | Additional joint |
-| chuckya_geo | 30 | 31 | Additional joint |
-| scuttlebug_geo | 42 | 43 | Additional joint |
-| skeeter_geo | 28 | 18 | Reduced hierarchy |
+| black_bobomb_geo | 13 | 14 | Supported: embedded animations |
+| bobomb_buddy_geo | 13 | 14 | Supported: embedded animations |
+| chuckya_geo | 30 | 31 | Supported: embedded animations |
+| scuttlebug_geo | 42 | 43 | Supported: static final joint |
+| skeeter_geo | 28 | 18 | Supported: embedded animations |
 | bowser_key_cutscene_geo | 2 | Unresolved | Unbalanced geometry close |
 | klepto_geo | 26 | 26 | Unsupported callback 615 |
 | mr_blizzard_geo | 9 | 9 | Unsupported palette copy |
@@ -281,5 +283,52 @@ Reader acceptance is not a substitute for visual verification on Wii U.
 The last four skeletons match their native parent/order signatures in a
 structural inspection that does not execute callbacks or graphics. Their
 material/callback failures remain enforced by the production reader.
-This branch does not implement custom bones or replace actor animations.
+General skeleton retargeting and Lua-defined animation/actions are not implemented.
 No third-party model packs, textures, ROMs or compiled game data are included.
+
+## Basic custom NPC animation support
+
+The native actor continues to own its animation state, timer, acceleration,
+collision, sound events and gameplay completion checks. For Bob-ombs, Chuckya
+and Skeeter only, a replacement with a different skeleton may supply embedded
+animations in the native slot order. The original animation pointer is matched
+against that actor's bounded native table; animID is not used because native
+NPC initialization does not reliably update it. Flags and vertical translation
+divisor must agree. Frames, including the previous interpolation frame, are
+mapped from the original clock to the replacement's intro/loop interval.
+No second animation update is performed. Held NPCs use the same path.
+
+If the requested native animation has no compatible replacement, render the
+original actor for that state and log DYNOS_NPC_ANIMATION_FALLBACK once.
+Chuckya's supplied pack contains five animations: native slots 0 through 4
+used by its current behavior. Its sixth native slot falls back to the original.
+
+Other NPCs may add at most eight final joints when every original joint and
+parent/order relationship is preserved, and each extra joint has an original
+joint as parent. Convert these final joints to native translation nodes before
+creating the graph. They inherit their parent's transform and consume no
+animation channels. Scuttlebug uses this path for its additional body part.
+Ambiguous shared-node roles, inserted/reordered joints without supported
+embedded animations, and partial switch/LOD skeleton changes remain rejected.
+Player skeleton validation stays at the original 20 joints.
+
+Animation values/indices are decoded to native-endian arrays. Validate table
+references, channel counts, value ranges, timings and model/animation joint
+counts before use. Empty NULL table slots are legal. Zero-duration legacy
+placeholders may be retained unused, but cannot drive a custom skeleton.
+The existing model and resident-memory budgets include animation allocations.
+
+Validation: 31 automated regressions pass; all 67 original Swag BINs were
+inspected (62 accepted, five known rejections listed above). DS Mario, DS Luigi,
+Sunshine and all three Low Poly Promo players still pass the reader. A native
+probe checks all frames/channels for the two Bob-ombs, Chuckya and Skeeter
+against their actual original animation tables, and confirms Scuttlebug has
+42 animated joints after conversion using the real geo interpreter.
+Reproduce that probe with:
+
+```sh
+python3 tools/tests/check_dynos_actor_animations.py /path/to/swag-replacements-v1.0.zip
+```
+
+Wii U compilation and a DYNOS=0 renderer compile are checked. Visual behavior
+and performance of this extension still need console verification.

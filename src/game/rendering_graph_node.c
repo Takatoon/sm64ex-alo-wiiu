@@ -12,6 +12,7 @@
 #include "shadow.h"
 #ifdef DYNOS
 #include "pc/dynos/dynos.h"
+#include "pc/dynos/dynos_animation.h"
 #include "mario_misc.h"
 #include "object_list_processor.h"
 #endif
@@ -1113,6 +1114,22 @@ void process_object_scale_interpolated(struct Object *node, Vec3f scaleInterpola
 /**
  * Process an object node.
  */
+#ifdef DYNOS
+static struct GraphNode *dynos_render_npc(struct GraphNode *original, struct AnimInfo *info) {
+    const struct Animation *animation = NULL;
+    struct GraphNode *graph = dynos_npc_graph_with_animation(original, info->curAnim, &animation);
+    if (animation != NULL) {
+        gCurrAnimFrame = dynos_animation_frame(info->curAnim, animation, gCurrAnimFrame);
+#ifdef HIGH_FPS_PC
+        gPrevAnimFrame = dynos_animation_frame(info->curAnim, animation, gPrevAnimFrame);
+#endif
+        gCurrAnimAttribute = (u16 *) animation->index;
+        gCurrAnimData = (s16 *) animation->values;
+    }
+    return graph;
+}
+#endif
+
 void geo_process_object(struct Object *node) {
 #ifdef HIGH_FPS_PC
     Vec3f scaleInterpolated;
@@ -1222,7 +1239,7 @@ void geo_process_object(struct Object *node) {
 #ifdef DYNOS
             if (node == gMarioObject || (void *) node == (void *) &gMirrorMario)
                 sharedChild = dynos_player_graph(sharedChild);
-            else sharedChild = dynos_npc_graph(sharedChild);
+            else sharedChild = dynos_render_npc(sharedChild, &node->header.gfx.animInfo);
 #endif
             if (sharedChild != NULL) {
                 gCurGraphNodeObject = (struct GraphNodeObject *) node;
@@ -1324,7 +1341,7 @@ void geo_process_held_object(struct GraphNodeHeldObject *node) {
 
         struct GraphNode *heldChild=node->objNode->header.gfx.sharedChild;
 #ifdef DYNOS
-        heldChild=dynos_npc_graph(heldChild);
+        heldChild=dynos_render_npc(heldChild, &node->objNode->header.gfx.animInfo);
 #endif
         geo_process_node_and_siblings(heldChild);
         gCurGraphNodeHeldObject = NULL;

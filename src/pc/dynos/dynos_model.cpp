@@ -1,7 +1,7 @@
 /* DynOS binary format reference: Render96/Render96ex (alpha),
  * data/dynos_gfx_load.cpp; coop-deluxe/sm64coopdx, data/dynos_bin_*.cpp.
  * This independent reader builds native pointers/commands, including PPC
- * byte order. Only validated Mario-compatible model geometry is accepted.
+ * byte order. Only validated native or explicitly supported actor animation layouts are accepted.
  */
 #include "dynos_model.h"
 #include <algorithm>
@@ -103,17 +103,33 @@ void palette(Model &m, const std::string &slot) {
 }
 void read_records(Model &m, Reader &r, const std::string &key) {
     size_t records=0, commands=0, geo_words=0;
+    std::vector<std::string> animation_names;
     while (r.pos < r.size) {
         require(++records <= 8192, "too many records");
         unsigned type = r.u8();
         // Legacy files may terminate with a single zero byte.
         if (!type) { require(r.pos==r.size,"trailing binary data"); break; }
         auto name = r.name();
-        if (type == 8) { // Animations retained in the file, not installed.
-            r.take(16); auto n=r.count(MAX_BYTES/2); r.take(size_t(n)*2);
-            n=r.count(MAX_BYTES/2); r.take(size_t(n)*2); continue;
+        if (type == 8) {
+            require(m.animations.size()<256&&!m.animations.count(name),"duplicate or excessive animation");
+            std::unique_ptr<ModelAnimation> animation(new ModelAnimation);auto &a=*animation;auto &v=a.native;
+            v.flags=int16_t(r.u16());v.animYTransDivisor=int16_t(r.u16());v.startFrame=int16_t(r.u16());
+            v.loopStart=int16_t(r.u16());v.loopEnd=int16_t(r.u16());v.unusedBoneCount=int16_t(r.u16());v.length=r.u32();
+            require(v.flags>=0&&v.flags<=255&&v.startFrame>=0&&v.loopStart>=0&&((v.loopEnd>v.loopStart&&v.startFrame<v.loopEnd)||(v.loopEnd==0&&v.loopStart==0&&v.startFrame==0)),"invalid animation timing");
+            require(v.unusedBoneCount>=0&&v.unusedBoneCount<=64,"animation joint limit");
+            auto count=r.count(1048576);a.values.reserve(count);while(count--)a.values.push_back(int16_t(r.u16()));
+            count=r.count(6*65);a.indices.reserve(count);while(count--)a.indices.push_back(r.u16());
+            require(a.indices.size()==size_t(v.unusedBoneCount+1)*6,"animation channel count mismatch");
+            for(size_t i=0;i<a.indices.size();i+=2){size_t n=a.indices[i],offset=a.indices[i+1];require(n&&offset<a.values.size()&&n<=a.values.size()-offset,"animation channel outside values");}
+            v.values=a.values.data();v.index=a.indices.data();v.length=0;
+            m.memory_bytes+=sizeof(ModelAnimation)+a.values.capacity()*2+a.indices.capacity()*2;
+            m.animations.emplace(name,std::move(animation));continue;
         }
-        if (type == 9) continue; // Animation-table entry's name is its payload.
+        if (type == 9) {
+            require(m.animation_table.size()<257,"animation table limit");
+            // References can precede animation records. Resolve after reading.
+            m.animation_table.push_back(nullptr);animation_names.push_back(name);continue;
+        }
         if (type == 10) { r.take(5); continue; } // Legacy dynamic-command marker.
         std::unique_ptr<Record> ptr(new Record);
         Record &n=*ptr; n.type=type; n.name=name;
@@ -181,6 +197,11 @@ void read_records(Model &m, Reader &r, const std::string &key) {
             default: throw std::runtime_error("unsupported DynOS record type "+std::to_string(type));
         }
         m.records.emplace(name,std::move(ptr));
+    }
+    for(size_t i=0;i<animation_names.size();++i){
+        if(animation_names[i]=="NULL")continue; // Empty animation slots are legal, including in player packs.
+        auto found=m.animations.find(animation_names[i]);require(found!=m.animations.end(),"missing table animation");
+        m.animation_table[i]=found->second.get();
     }
     require(m.root!=nullptr,"no model geometry");
     std::set<Record*> active;
@@ -329,8 +350,8 @@ int pointer_index(unsigned op,uint32_t w,unsigned length) {
     if((op==0x10||op==0x11||op==0x12||op==0x14||op==0x1d)&&(w&0x8000))return length-1;
     return -1;
 }
-struct Tree { unsigned op;std::vector<Tree> children; };
-void fix_geometry(Model &m,CallbackResolver resolver,const std::vector<int> *expected_hierarchy) {
+struct Tree { unsigned op;std::vector<Tree> children;Record *source;size_t word; };
+void fix_geometry(Model &m,CallbackResolver resolver,const std::vector<int> *expected_hierarchy,bool allow_actor_animations) {
     for(auto &entry:m.records) {
         auto &r=*entry.second;if(r.type!=5)continue;
         size_t at=0;unsigned last=0;bool ended=false;
@@ -376,7 +397,7 @@ void fix_geometry(Model &m,CallbackResolver resolver,const std::vector<int> *exp
             if(op==4){require(last&&stack.size()<30,"invalid geometry nesting");stack.push_back(&last->children);last=nullptr;}
             else if(op==5){require(stack.size()>initial,"unbalanced geometry close");stack.pop_back();last=nullptr;}
             else if(op==0||op==2){expand(record(m,r.words[i+1],5),depth+1);last=nullptr;}
-            else if(op!=1&&op!=3){require(++node_count<32768,"expanded geometry limit");stack.back()->push_back({op,{}});last=&stack.back()->back();}
+            else if(op!=1&&op!=3){require(++node_count<32768,"expanded geometry limit");stack.back()->push_back({op,{},&r,i});last=&stack.back()->back();}
             i+=n;
         }
         require(stack.size()==initial,"unbalanced geometry open");active.erase(&r);
@@ -393,12 +414,24 @@ void fix_geometry(Model &m,CallbackResolver resolver,const std::vector<int> *exp
     };
     check_matrices(tree,0);
     std::function<std::vector<int>(const std::vector<Tree>&,int,int)> signature;
-    size_t optional_actor_size=0;
+    size_t optional_actor_size=0;bool make_static=false;
+    std::map<std::pair<Record*,size_t>,bool> static_uses;
     signature=[&](const std::vector<Tree> &nodes,int parent,int base){
         std::vector<int> result;
         for(size_t i=0;i<nodes.size();i++) {
             const Tree &n=nodes[i];int joint=parent;
-            if(n.op==0x13){joint=base+int(result.size());result.push_back(parent);}
+            if(n.op==0x13){joint=base+int(result.size());result.push_back(parent);
+                if(make_static){
+                    bool extra=size_t(joint)>=expected_hierarchy->size();auto location=std::make_pair(n.source,n.word);
+                    auto inserted=static_uses.emplace(location,extra);
+                    require(inserted.second||inserted.first->second==extra,"shared joint has conflicting animation roles");
+                }
+                if(make_static&&size_t(joint)>=expected_hierarchy->size()){
+                    // Same three-word encoding as TRANSLATE_NODE_WITH_DL.
+                    uint32_t header=n.source->words[n.word].value;
+                    n.source->layout[n.word]=bbh((header&~255u)|0x11u|0x8000u);
+                }
+            }
             std::vector<int> sub;
             if(n.op==0x0e){
                 require(!n.children.empty(),"empty geometry switch");
@@ -425,14 +458,27 @@ void fix_geometry(Model &m,CallbackResolver resolver,const std::vector<int> *exp
     const std::vector<int> expected={-1,0,1,2,2,4,5,6,2,8,9,10,1,12,13,14,1,16,17,18};
     m.animation_parents=signature(tree,-1,0);
     require(!optional_actor_size||optional_actor_size==m.animation_parents.size(),"partial empty actor switch");
-    require(m.animation_parents==(expected_hierarchy?*expected_hierarchy:expected),
-            expected_hierarchy?"model does not match original actor animation hierarchy":"model does not match Mario's 20-joint animation hierarchy");
+    m.compatible_hierarchy=expected_hierarchy?*expected_hierarchy:expected;
+    if(m.animation_parents!=m.compatible_hierarchy){
+        bool embedded=expected_hierarchy&&allow_actor_animations&&!m.animation_table.empty();
+        if(embedded){
+            bool any=false;for(auto animation:m.animation_table)if(animation){any=true;require(animation->native.loopEnd>0,"invalid custom animation timing");require(size_t(animation->native.unusedBoneCount)==m.animation_parents.size(),"animation does not match custom skeleton");}
+            require(any,"empty custom animation table");m.custom_animation_hierarchy=true;
+        } else {
+            size_t count=m.compatible_hierarchy.size();
+            bool trailing=expected_hierarchy&&count&&m.animation_parents.size()>count&&m.animation_parents.size()<=count+8&&
+                std::equal(m.compatible_hierarchy.begin(),m.compatible_hierarchy.end(),m.animation_parents.begin());
+            if(trailing)for(size_t i=count;i<m.animation_parents.size();++i)trailing&=m.animation_parents[i]>=0&&size_t(m.animation_parents[i])<count;
+            require(trailing,expected_hierarchy?"model does not match original actor animation hierarchy":"model does not match Mario's 20-joint animation hierarchy");
+            m.static_joint_count=m.animation_parents.size()-count;make_static=true;signature(tree,-1,0);
+        }
+    }
 }
 }
 
 std::unique_ptr<Model> load(const uint8_t *data,size_t size,const std::string &key,
                           const std::string &slot,CallbackResolver resolver,std::string &error,
-                          const std::vector<int> *expected_hierarchy) {
+                          const std::vector<int> *expected_hierarchy,bool allow_actor_animations) {
     try {
         require(data&&size&&size<=MAX_BYTES,"binary file size limit");
         std::vector<uint8_t> uncompressed;
@@ -448,7 +494,7 @@ std::unique_ptr<Model> load(const uint8_t *data,size_t size,const std::string &k
             data=uncompressed.data();size=uncompressed.size();
         }
         std::unique_ptr<Model> m(new Model);palette(*m,slot);Reader reader{data,size};
-        read_records(*m,reader,key);fix_display_lists(*m);fix_geometry(*m,resolver,expected_hierarchy);
+        read_records(*m,reader,key);fix_display_lists(*m);fix_geometry(*m,resolver,expected_hierarchy,allow_actor_animations);
         for(auto &entry:m->records){auto &r=*entry.second;m->memory_bytes+=r.bytes.capacity()+r.vertices.capacity()*sizeof(Vtx)+r.display_list.capacity()*sizeof(Gfx)+r.layout.capacity()*sizeof(uintptr_t)+sizeof(Record);r.words.clear();r.words.shrink_to_fit();}
         require(m->memory_bytes<=64*1024*1024,"model memory limit");error.clear();return m;
     } catch(const std::exception &e){error=e.what();return nullptr;}

@@ -266,8 +266,9 @@ the upstream project. For this fork's Wii U workflow, use the guide above.
  * To build for 3DS, [click here](https://github.com/sm64-port/sm64_3ds/blob/master/README.md). (TARGET_N3DS=1)
  * To build for Switch, [click here](https://github.com/fgsfdsfgs/sm64ex/blob/switch/README.md). (TARGET_SWITCH=1)
 
-## Optional DynOS player packs
+## Optional DynOS model packs
 
 Build with `DYNOS=1 EXTERNAL_DATA=1`, or pass `--dynos enabled` to the Wii U
-build wizard. Compatible player BINs can then be installed in the application
-folder without rebuilding. See [installation and initial compatibility limits](docs/dynos-player-packs.md).
+build wizard. Compatible player and NPC BINs can then be installed in the application
+folder without rebuilding. Basic NPC support includes embedded animations for
+Bob-ombs, Chuckya and Skeeter, and static trailing joints. See [installation and initial compatibility limits](docs/dynos-player-packs.md).

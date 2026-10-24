@@ -29,6 +29,11 @@ extern "C" {
 }
 #include "dynos_actor_registry.inc.h"
 
+extern "C" {
+extern const struct Animation *const bobomb_seg8_anims_0802396C[] __attribute__((weak));
+extern const struct Animation *const chuckya_seg8_anims_0800C070[] __attribute__((weak));
+extern const struct Animation *const skeeter_seg6_anims_06007DE0[] __attribute__((weak));
+}
 unsigned int dynos_player_choice;
 namespace {
 struct Entry {
@@ -38,6 +43,8 @@ struct Entry {
     std::unique_ptr<dynos::Model> model;
     GraphNode *graph=nullptr;
     bool failed=false;
+    bool logged_animation_fallback=false;
+    std::map<const Animation*,const Animation*> animation_overrides;
 };
 std::vector<std::unique_ptr<Entry>> entries;
 std::map<std::string,std::vector<std::unique_ptr<Entry>>> npc_entries;
@@ -154,20 +161,38 @@ void encode_label(Entry &entry,const std::string &prefix="") {
         entry.label[i++]=(c>='A'&&c<='Z')?c-'A'+10:(c>='0'&&c<='9')?c-'0':0x9e;
     }entry.label[i]=0xff;
 }
+struct NativeAnimations { const Animation *const *table;unsigned count; };
+NativeAnimations native_animations(const std::string &actor) {
+    if(actor=="black_bobomb_geo"||actor=="bobomb_buddy_geo")return {bobomb_seg8_anims_0802396C,2};
+    if(actor=="chuckya_geo")return {chuckya_seg8_anims_0800C070,6};
+    if(actor=="skeeter_geo")return {skeeter_seg6_anims_06007DE0,4};
+    return {nullptr,0};
+}
 bool load_entry(Entry &entry,const std::vector<int> *hierarchy=nullptr) {
     if(entry.failed)return false;
-    if(entry.model)return !hierarchy||entry.model->animation_parents==*hierarchy;
+    if(entry.model)return !hierarchy||entry.model->compatible_hierarchy==*hierarchy;
+    auto bank=native_animations(entry.slot);
     fs_file_t *file=fs_open(entry.path.c_str());std::string error;
     if(file) {
         auto size=fs_size(file);
         if(size>0&&size<=32*1024*1024) {
             std::vector<uint8_t> data(size_t(size),uint8_t(0));
             if(fs_read(file,data.data(),data.size())==size)
-                entry.model=dynos::load(data.data(),data.size(),std::to_string(entry.id),entry.slot,callback,error,hierarchy);
+                entry.model=dynos::load(data.data(),data.size(),std::to_string(entry.id),entry.slot,callback,error,hierarchy,hierarchy&&bank.table);
             else error="short read";
         } else error="binary size exceeds limit";
         fs_close(file);
     } else error="file cannot be opened";
+    if(entry.model&&entry.model->custom_animation_hierarchy) {
+        for(unsigned i=0;bank.table&&i<bank.count&&i<entry.model->animation_table.size();++i){
+            auto alternate=entry.model->animation_table[i];const Animation *native=bank.table[i];
+            if(!alternate||!native)continue;
+            const Animation *replacement=&alternate->native;
+            if(native->flags==replacement->flags&&native->animYTransDivisor==replacement->animYTransDivisor)
+                entry.animation_overrides[native]=replacement;
+        }
+        if(entry.animation_overrides.empty()){entry.model.reset();error="no compatible native animation slots";}
+    }
     if(entry.model&&resident_bytes+entry.model->memory_bytes>128*1024*1024) {
         entry.model.reset();error="resident model memory budget reached";
     }
@@ -182,7 +207,7 @@ bool load_entry(Entry &entry,const std::vector<int> *hierarchy=nullptr) {
         DYNOS_LOG("DYNOS_LOADED path=%s vertices=%u textures=%u bytes=%u",entry.path.c_str(),unsigned(entry.model->vertex_count),unsigned(entry.model->texture_count),unsigned(entry.model->memory_bytes));
         return true;
     }
-    entry.failed=true;encode_label(entry,"ERROR ");
+    entry.animation_overrides.clear();entry.failed=true;encode_label(entry,"ERROR ");
     DYNOS_LOG("DYNOS_REJECT path=%s reason=%s",entry.path.c_str(),error.c_str());
     return false;
 }
@@ -220,7 +245,7 @@ void dynos_init(void) {
         if(configDynosModel==id)dynos_player_choice=entries.size()+1;
         labels[entries.size()+1]=entry->label.data();entries.push_back(std::move(entry));
     }
-    DYNOS_LOG("DYNOS_INIT version=2 models=%u npc_targets=%u scope=native_actor_animations star_hand_trace=1",unsigned(entries.size()),unsigned(npc_entries.size()));
+    DYNOS_LOG("DYNOS_INIT version=3 models=%u npc_targets=%u scope=basic_actor_animations star_hand_trace=1",unsigned(entries.size()),unsigned(npc_entries.size()));
 }
 
 void dynos_update(void) {
@@ -259,13 +284,31 @@ void dynos_bind_model(unsigned model,const void *layout,GraphNode *original) {
     if(!dynos::native_hierarchy(original,hierarchy)){DYNOS_LOG("DYNOS_NPC_REJECT actor=%s reason=native_hierarchy",actor);return;}
     for(auto entry:candidates)if(load_entry(*entry,&hierarchy)) {
         npc_bindings[original]={model,entry};
-        DYNOS_LOG("DYNOS_NPC_BOUND actor=%s path=%s alternatives=%u",actor,entry->path.c_str(),unsigned(candidates.size()));
+        DYNOS_LOG("DYNOS_NPC_BOUND actor=%s path=%s alternatives=%u animation_slots=%u static_joints=%u",actor,entry->path.c_str(),unsigned(candidates.size()),unsigned(entry->animation_overrides.size()),entry->model->static_joint_count);
         return;
     }
 }
 GraphNode *dynos_npc_graph(GraphNode *original) {
     auto found=npc_bindings.find(original);
     return found==npc_bindings.end()?original:found->second.entry->graph;
+}
+
+GraphNode *dynos_npc_graph_with_animation(GraphNode *original,const Animation *native,const Animation **replacement) {
+    *replacement=nullptr;auto found=npc_bindings.find(original);
+    if(found==npc_bindings.end())return original;
+    Entry &entry=*found->second.entry;
+    if(entry.model->custom_animation_hierarchy){
+        auto alternate=entry.animation_overrides.find(native);
+        if(alternate==entry.animation_overrides.end()){
+            if(!entry.logged_animation_fallback){
+                DYNOS_LOG("DYNOS_NPC_ANIMATION_FALLBACK path=%s reason=unmapped_native_animation",entry.path.c_str());
+                entry.logged_animation_fallback=true;
+            }
+            return original;
+        }
+        *replacement=alternate->second;
+    }
+    return entry.graph;
 }
 
 GraphNode *dynos_player_graph(GraphNode *original) {return selected_graph?selected_graph:original;}

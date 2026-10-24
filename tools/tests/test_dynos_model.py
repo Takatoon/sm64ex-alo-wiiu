@@ -28,6 +28,17 @@ def geometry(extra=(),parents=PARENTS):
     return b'\x05' + name('mario_geo') + struct.pack('<I',len(words)) + struct.pack('<'+'I'*len(words),*words)
 
 
+def animation_record(bones, symbol='custom_animation', end=4, count=4, offset=0):
+    values=struct.pack('<4h',0,100,200,300)
+    indices=struct.pack('<HH',count,offset)*(3*(bones+1))
+    return (b'\x08'+name(symbol)+struct.pack('<6hI',0,0,0,0,end,bones,0)+
+            struct.pack('<I',4)+values+struct.pack('<I',6*(bones+1))+indices)
+
+
+def animation_table(*symbols):
+    return b''.join(b'\x09'+name(symbol) for symbol in (*symbols,'NULL'))
+
+
 class NativeReaderTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -43,12 +54,13 @@ class NativeReaderTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.temporary.cleanup()
 
-    def check(self,data,accepted,message='',expected_hierarchy=None):
+    def check(self,data,accepted,message='',expected_hierarchy=None,actor=None):
         file=self.folder/'model.bin';file.write_bytes(data)
         args=[str(self.exe),str(file)]
         if expected_hierarchy is not None:
             expected=self.folder/'hierarchy.txt';expected.write_text(' '.join(map(str,expected_hierarchy)))
             args.append(str(expected))
+        if actor:args.append(actor)
         result=subprocess.run(args,capture_output=True,text=True)
         self.assertEqual(result.returncode,0 if accepted else 2,result.stdout+result.stderr)
         if message:self.assertIn(message,result.stderr)
@@ -83,6 +95,32 @@ class NativeReaderTest(unittest.TestCase):
         self.check(data,True,expected_hierarchy=[-1,0,0])
         self.check(data,False,'original actor',expected_hierarchy=[-1,0,1])
         self.check(geometry(parents=[]),True,expected_hierarchy=[])
+
+    def test_custom_actor_animation_channels_and_retarget_opt_in(self):
+        native=[-1,0,0];custom=[-1,0,1,2]
+        data=animation_record(4)+animation_table('custom_animation')+geometry(parents=custom)
+        self.check(data,False,'original actor',expected_hierarchy=native)
+        self.check(data,True,expected_hierarchy=native,actor='black_bobomb_geo')
+        bad=animation_record(3)+animation_table('custom_animation')+geometry(parents=custom)
+        self.check(bad,False,'custom skeleton',expected_hierarchy=native,actor='black_bobomb_geo')
+        self.check(animation_table('missing')+geometry(),False,'missing table animation')
+
+    def test_animation_bounds_and_table_validation(self):
+        for count,offset in [(0,0),(4,1),(1,4)]:
+            self.check(animation_record(20,count=count,offset=offset)+geometry(),False,'channel outside')
+        self.check(animation_record(20,end=-1)+geometry(),False,'timing')
+        self.check(animation_record(20,end=0)+geometry(),True)  # Unused legacy placeholder.
+        disabled=animation_record(4,end=0)+animation_table('custom_animation')+geometry(parents=[-1,0,1,2])
+        self.check(disabled,False,'timing',expected_hierarchy=[-1,0,0],actor='black_bobomb_geo')
+        self.check(animation_record(20)+animation_record(20)+geometry(),False,'duplicate')
+        self.check(animation_table()+b'\x09'+name('more')+geometry(),False,'missing table animation')
+        holes=animation_record(20)+b'\x09'+name('NULL')+animation_table('custom_animation')
+        self.check(holes+geometry(),True)
+
+    def test_trailing_static_joint_preserves_native_channels(self):
+        self.check(geometry(parents=[-1,0,0,0]),True,expected_hierarchy=[-1,0,0])
+        self.check(geometry(parents=[-1,0,1,0]),False,'original actor',expected_hierarchy=[-1,0,0])
+        self.check(geometry(parents=[-1,0,0,2,3]),False,'original actor',expected_hierarchy=[-1,0,0])
 
     def test_npc_callbacks_preserve_command_context(self):
         data=geometry([0x18,0x434e5546,38]);pos=1+len(name('mario_geo'))

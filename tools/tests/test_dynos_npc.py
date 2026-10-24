@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from test_dynos_model import geometry
+from test_dynos_model import geometry, animation_record, animation_table
 ROOT=Path(__file__).resolve().parents[2]
 class DynosNpcTest(unittest.TestCase):
     def test_runtime_npc_fallback_rebinding_and_shortcut_persistence(self):
@@ -10,6 +10,8 @@ class DynosNpcTest(unittest.TestCase):
             folder=Path(temporary)
             for pack,data in [('A broken',b'bad'),('B valid',geometry(parents=[-1,0,0])),('C unused',b'bad')]:
                 file=folder/'dynos/packs'/pack/'actors/toad_geo.bin';file.parent.mkdir(parents=True);file.write_bytes(data)
+            npc=folder/'dynos/packs/B valid/actors/black_bobomb_geo.bin'
+            npc.write_bytes(animation_record(4)+animation_table('custom_animation')+geometry(parents=[-1,0,1,2]))
             player=folder/'dynos/packs/Player/mario_geo.bin';player.parent.mkdir(parents=True);player.write_bytes(geometry())
             includes=['-I.','-Iinclude','-Isrc','-DDYNOS=1','-DEXTERNAL_DATA=1','-DUSE_SYSTEM_MALLOC=1']
             objects=[]
@@ -29,6 +31,12 @@ class DynosNpcTest(unittest.TestCase):
             exe=Path(temporary)/'graph'
             subprocess.run(['g++','-std=c++17','-I.','-Iinclude','-Isrc','-D_LANGUAGE_C_PLUS_PLUS=1',
                             'src/pc/dynos/dynos_graph.cpp','tools/tests/dynos_graph_test.cpp','-o',str(exe)],cwd=ROOT,check=True)
+            subprocess.run([str(exe)],check=True)
+    def test_actor_animation_clock_preserves_endpoints_and_intro(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            exe=Path(temporary)/'animation'
+            subprocess.run(['g++','-D_LANGUAGE_C_PLUS_PLUS=1','-Iinclude','-Isrc',
+                            'tools/tests/dynos_animation_test.cpp','-o',str(exe)],cwd=ROOT,check=True)
             subprocess.run([str(exe)],check=True)
     def test_physical_shortcut_edges_and_held_buttons(self):
         with tempfile.TemporaryDirectory() as temporary:
