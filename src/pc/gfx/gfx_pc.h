@@ -39,6 +39,10 @@ void gfx_load_timing_level_ready(s16 level_num);
 void gfx_load_timing_save_confirmed(void);
 #endif
 #endif
+#ifdef DYNOS
+bool gfx_begin_mod_reload(void);
+void gfx_end_mod_reload(void);
+#endif
 void gfx_shutdown(void);
 
 #ifdef __cplusplus

@@ -20,7 +20,12 @@
 #include "pc/configfile.h"
 #ifdef DYNOS
 #include "pc/dynos/dynos.h"
-static const u8 dynosModelLabel[] = { TEXT_OPT_DYNOS_MODEL };
+static const u8 modsStr[][32] = {
+    { TEXT_MODS_TITLE }, { TEXT_MODS_ENABLED }, { TEXT_MODS_TEXTURES },
+    { TEXT_MODS_PLAYER }, { TEXT_MODS_NPCS }, { TEXT_MODS_APPLY }, { TEXT_MODS_APPLYING }
+};
+static const u8 modsYesNo[][8] = {{ TEXT_MODS_NO },{ TEXT_MODS_YES }};
+static const u8 *modsEnableChoices[] = {modsYesNo[0],modsYesNo[1]};
 #endif
 
 #ifndef TARGET_N64
@@ -311,11 +316,25 @@ static struct Option optsHud[] = {
 static struct SubMenu menuHud = DEF_SUBMENU( optsSettingsStr[0], optsHud );
 #endif
 
-static struct Option optsSettings[] = {
 #ifdef DYNOS
-    { .type = OPT_CHOICE, .label = dynosModelLabel, .uval = &dynos_player_choice,
-      .choices = NULL, .numChoices = 1 },
+static void optmods_apply(UNUSED struct Option *self,s32 arg){if(!arg)dynos_request_apply();}
+static struct Option optsMods[] = {
+    DEF_OPT_CHOICE(modsStr[1], &dynos_mods_enabled, modsEnableChoices),
+    {.type=OPT_CHOICE,.label=modsStr[2],.uval=&dynos_texture_choice,.choices=NULL,.numChoices=2},
+    {.type=OPT_CHOICE,.label=modsStr[3],.uval=&dynos_player_choice,.choices=NULL,.numChoices=1},
+    {.type=OPT_CHOICE,.label=modsStr[4],.uval=&dynos_npc_choice,.choices=NULL,.numChoices=1},
+    DEF_OPT_BUTTON(modsStr[5],optmods_apply),
+};
+static struct SubMenu menuMods = DEF_SUBMENU(modsStr[0],optsMods);
+static void optmods_refresh(void){
+    optsMods[1].choices=dynos_texture_labels();optsMods[1].numChoices=dynos_texture_count();
+    optsMods[2].choices=dynos_player_labels();optsMods[2].numChoices=dynos_player_count();
+    optsMods[3].choices=dynos_npc_pack_labels();optsMods[3].numChoices=dynos_npc_pack_count();
+    optsMods[4].label=modsStr[dynos_apply_pending()?6:5];
+}
 #endif
+
+static struct Option optsSettings[] = {
 #ifndef TARGET_N64
     DEF_OPT_SUBMENU( optsSettingsStr[0], &menuHud ),
 #else
@@ -364,6 +383,9 @@ static struct Option optsMain[] = {
 
     DEF_OPT_SUBMENU( optMainStr[4], &menuAudio ),
     DEF_OPT_SUBMENU( optMainStr[5], &menuSettings ),
+#ifdef DYNOS
+    DEF_OPT_SUBMENU( modsStr[0], &menuMods ),
+#endif
 
 #ifdef EXT_DEBUG_MENU
     // NOTE: always keep cheats the last option here because of the half-assed way I toggle them
@@ -541,8 +563,7 @@ static inline s16 get_hudstr_centered_x(const s16 sx, const u8 *str) {
 //Options menu
 void optmenu_draw(void) {
 #ifdef DYNOS
-    optsSettings[0].choices = dynos_player_labels();
-    optsSettings[0].numChoices = dynos_player_count();
+    optmods_refresh();
 #endif
     u8 i;
     s16 scroll;
@@ -634,8 +655,7 @@ void optmenu_toggle(void) {
 
 void optmenu_check_buttons(void) {
 #ifdef DYNOS
-    optsSettings[0].choices = dynos_player_labels();
-    optsSettings[0].numChoices = dynos_player_count();
+    optmods_refresh();
 #endif
 #if !defined(TARGET_N64) && !defined(TARGET_PORT_CONSOLE)
     if (optmenu_binding) {

@@ -8,7 +8,7 @@ class DynosNpcTest(unittest.TestCase):
     def test_runtime_npc_fallback_rebinding_and_shortcut_persistence(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder=Path(temporary)
-            for pack,data in [('A broken',b'bad'),('B valid',geometry(parents=[-1,0,0])),('C unused',b'bad')]:
+            for pack,data in [('A broken',b'bad'),('B valid',geometry(parents=[-1,0,0])),('C alternate',geometry(parents=[-1,0,0]))]:
                 file=folder/'dynos/packs'/pack/'actors/toad_geo.bin';file.parent.mkdir(parents=True);file.write_bytes(data)
             npc=folder/'dynos/packs/B valid/actors/black_bobomb_geo.bin'
             npc.write_bytes(animation_record(4)+animation_table('custom_animation')+geometry(parents=[-1,0,1,2]))
@@ -25,7 +25,7 @@ class DynosNpcTest(unittest.TestCase):
             result=subprocess.run([str(exe),str(folder)],cwd=ROOT,check=True,capture_output=True,text=True)
             self.assertIn('A broken/actors/toad_geo.bin reason=',result.stdout)
             self.assertIn('DYNOS_NPC_BOUND actor=toad_geo path=dynos/packs/B valid/',result.stdout)
-            self.assertNotIn('C unused/actors/toad_geo.bin',result.stdout)
+            self.assertIn('C alternate/actors/toad_geo.bin',result.stdout)
     def test_native_actor_hierarchy_switches_lods_and_cycles(self):
         with tempfile.TemporaryDirectory() as temporary:
             exe=Path(temporary)/'graph'

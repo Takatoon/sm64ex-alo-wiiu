@@ -23,6 +23,8 @@ struct fs_dir_s {
     const char *realpath;
     fs_packtype_t *packer;
     struct fs_dir_s *prev, *next;
+    bool base_texture_pack, texture_pack;
+    unsigned mount_order;
 };
 
 extern fs_packtype_t fs_packtype_dir;
@@ -34,11 +36,41 @@ static fs_packtype_t *fs_packers[] = {
 };
 
 static fs_dir_t *fs_searchpaths = NULL;
+static bool texture_policy_active;
+static bool texture_all = true;
+static char texture_selected[SYS_MAX_PATH];
+static unsigned mount_sequence;
+
+static bool texture_path(const char *path) {
+    return !strcmp(path,"gfx") || !strncmp(path,"gfx/",4);
+}
+static int texture_priority(const fs_dir_t *a,const fs_dir_t *b) {
+    if(a==b)return 0;
+    if(a->base_texture_pack!=b->base_texture_pack)return a->base_texture_pack?-1:1;
+    if(!a->base_texture_pack){
+        int order=sys_strcasecmp(sys_file_name(a->realpath),sys_file_name(b->realpath));
+        if(!order)order=strcmp(a->realpath,b->realpath);
+        if(order)return order;
+    }
+    return a->mount_order>b->mount_order?1:-1;
+}
+static fs_dir_t *next_for_path(fs_dir_t *previous,const char *path) {
+    if(!texture_policy_active||!texture_path(path))return previous?previous->next:fs_searchpaths;
+    fs_dir_t *best=NULL;
+    for(fs_dir_t *dir=fs_searchpaths;dir;dir=dir->next){
+        bool allowed=dir->base_texture_pack || (dir->texture_pack &&
+            (texture_all||!strcmp(dir->realpath,texture_selected)));
+        if(!allowed||(previous&&texture_priority(dir,previous)>=0))continue;
+        if(!best||texture_priority(dir,best)>0)best=dir;
+    }
+    return best;
+}
+
 
 #ifdef TARGET_WII_U
 static fs_load_result_t fs_try_fast_load(const char *vpath, void **buffer,
                                          uint64_t *size) {
-    for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next) {
+    for (fs_dir_t *dir = next_for_path(NULL,vpath); dir; dir = next_for_path(dir,vpath)) {
         if (dir->packer->load_file) {
             fs_load_result_t result = dir->packer->load_file(dir->pack, vpath, buffer, size);
             if (result != FS_LOAD_NOT_FOUND) {
@@ -137,7 +169,7 @@ bool fs_mount(const char *realpath) {
     if (fs_find_dir(realpath))
         return false; // already mounted
 
-    const char *ext = sys_file_extension(realpath);
+    const char *ext = fs_sys_dir_exists(realpath) ? NULL : sys_file_extension(realpath);
     void *pack = NULL;
     fs_packtype_t *packer = NULL;
     bool tried = false;
@@ -167,6 +199,9 @@ bool fs_mount(const char *realpath) {
     dir->pack = pack;
     dir->realpath = sys_strdup(realpath);
     dir->packer = packer;
+    dir->base_texture_pack = !sys_strcasecmp(sys_file_name(realpath),"base.zip");
+    dir->texture_pack = !dir->base_texture_pack && packer->is_dir(pack,"gfx");
+    dir->mount_order = ++mount_sequence;
     dir->prev = NULL;
     dir->next = fs_searchpaths;
     if (fs_searchpaths)
@@ -194,7 +229,7 @@ bool fs_unmount(const char *realpath) {
 
 fs_walk_result_t fs_walk(const char *base, walk_fn_t walkfn, void *user, const bool recur) {
     bool found = false;
-    for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next) {
+    for (fs_dir_t *dir = next_for_path(NULL,base); dir; dir = next_for_path(dir,base)) {
         fs_walk_result_t res = dir->packer->walk(dir->pack, base, walkfn, user, recur);
         if (res == FS_WALK_INTERRUPTED)
             return res;
@@ -205,7 +240,7 @@ fs_walk_result_t fs_walk(const char *base, walk_fn_t walkfn, void *user, const b
 }
 
 bool fs_is_file(const char *fname) {
-    for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next) {
+    for (fs_dir_t *dir = next_for_path(NULL,fname); dir; dir = next_for_path(dir,fname)) {
         if (dir->packer->is_file(dir->pack, fname))
             return true;
     }
@@ -213,7 +248,7 @@ bool fs_is_file(const char *fname) {
 }
 
 bool fs_is_dir(const char *fname) {
-    for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next) {
+    for (fs_dir_t *dir = next_for_path(NULL,fname); dir; dir = next_for_path(dir,fname)) {
         if (dir->packer->is_dir(dir->pack, fname))
             return true;
     }
@@ -221,7 +256,7 @@ bool fs_is_dir(const char *fname) {
 }
 
 fs_file_t *fs_open(const char *vpath) {
-    for (fs_dir_t *dir = fs_searchpaths; dir; dir = dir->next) {
+    for (fs_dir_t *dir = next_for_path(NULL,vpath); dir; dir = next_for_path(dir,vpath)) {
         fs_file_t *f = dir->packer->open(dir->pack, vpath);
         if (f) {
             f->parent = dir;
@@ -317,6 +352,24 @@ fs_pathlist_t fs_enumerate(const char *base, const bool recur) {
         fs_pathlist_free(&pathlist);
 
     return pathlist;
+}
+
+fs_pathlist_t fs_texture_packs(void) {
+    fs_pathlist_t list={malloc(sizeof(char*)*32),0,32};
+    if(!list.paths)return list;
+    for(fs_dir_t *dir=fs_searchpaths;dir;dir=dir->next)
+        if(dir->texture_pack&&!enumerate_walk(&list,dir->realpath)){fs_pathlist_free(&list);break;}
+    return list;
+}
+bool fs_set_texture_pack(const char *realpath) {
+    if(realpath&&*realpath){
+        fs_dir_t *dir=fs_find_dir(realpath);
+        if(!dir||!dir->texture_pack||strlen(realpath)>=sizeof(texture_selected))return false;
+    }
+    texture_all=realpath==NULL;
+    snprintf(texture_selected,sizeof(texture_selected),"%s",realpath?realpath:"");
+    texture_policy_active=true;
+    return true;
 }
 
 void fs_pathlist_free(fs_pathlist_t *pathlist) {

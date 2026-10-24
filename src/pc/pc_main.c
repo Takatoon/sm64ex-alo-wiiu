@@ -385,6 +385,7 @@ void main_func(void) {
 
     gfx_init(wm_api, rendering_api, window_title);
 #ifdef DYNOS
+    dynos_set_reload_hooks(gfx_begin_mod_reload,gfx_end_mod_reload);
     dynos_init();
 #endif
     #ifndef TARGET_PORT_CONSOLE

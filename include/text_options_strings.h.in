@@ -1,6 +1,15 @@
 #ifndef TEXT_OPTIONS_STRINGS_H
 #define TEXT_OPTIONS_STRINGS_H
 #define TEXT_OPT_DYNOS_MODEL _("DYNOS PLAYER MODEL")
+#define TEXT_MODS_TITLE _("MODS")
+#define TEXT_MODS_ENABLED _("ENABLE MODS")
+#define TEXT_MODS_TEXTURES _("TEXTURE PACK")
+#define TEXT_MODS_PLAYER _("PLAYER MODEL")
+#define TEXT_MODS_NPCS _("NPC PACK")
+#define TEXT_MODS_APPLY _("APPLY CHANGES")
+#define TEXT_MODS_APPLYING _("APPLYING...")
+#define TEXT_MODS_NO _("NO")
+#define TEXT_MODS_YES _("YES")
 
 /* Extended options menu text */
 

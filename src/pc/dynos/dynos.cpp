@@ -35,9 +35,10 @@ extern const struct Animation *const chuckya_seg8_anims_0800C070[] __attribute__
 extern const struct Animation *const skeeter_seg6_anims_06007DE0[] __attribute__((weak));
 }
 unsigned int dynos_player_choice;
+unsigned int dynos_mods_enabled=1,dynos_texture_choice=1,dynos_npc_choice;
 namespace {
 struct Entry {
-    std::string path, slot;
+    std::string path, slot, pack;
     uint32_t id;
     std::array<unsigned char, 40> label{};
     std::unique_ptr<dynos::Model> model;
@@ -50,6 +51,18 @@ std::vector<std::unique_ptr<Entry>> entries;
 std::map<std::string,std::vector<std::unique_ptr<Entry>>> npc_entries;
 struct Binding { unsigned model; Entry *entry; };
 std::map<GraphNode*,Binding> npc_bindings;
+struct Registered {unsigned model;const void *layout;GraphNode *original;};
+std::map<unsigned,Registered> registered_models;
+struct Pack {std::string path;uint32_t id;std::array<unsigned char,40> label{};};
+std::vector<Pack> texture_packs,npc_packs;
+const unsigned char *texture_labels[66],*npc_labels[65];
+unsigned char base_label[40],all_label[40],vanilla_label[40];
+struct Selection {bool enabled;unsigned texture,npc,player;};
+Selection active{true,1,0,0},requested{true,1,0,0};
+bool apply_requested=false,first_update=true;
+bool (*begin_reload)(void);
+void (*end_reload)(void);
+
 int pending_step;
 const unsigned char *labels[65];
 unsigned char original_label[]={0x18,0x1b,0x12,0x10,0x12,0x17,0x0a,0x15,0xff}; // ORIGINAL
@@ -140,6 +153,21 @@ uintptr_t callback(unsigned index) {
         default:return 0;
     }
 }
+void encode_text(std::array<unsigned char,40> &label,const std::string &text) {
+    size_t i=0;for(unsigned char c:text){if(i>=label.size()-1)break;
+        if(c>='a'&&c<='z')c-=32;
+        label[i++]=(c>='A'&&c<='Z')?c-'A'+10:(c>='0'&&c<='9')?c-'0':c=='.'?0x3f:0x9e;
+    }label[i]=0xff;
+}
+std::string pack_path(const std::string &file) {
+    auto slash=file.find_last_of('/');if(slash==std::string::npos)return ".";
+    std::string parent=file.substr(0,slash);
+    if(parent.size()>=7&&parent.substr(parent.size()-7)=="/actors")parent.resize(parent.size()-7);
+    return parent;
+}
+std::string pack_name(const std::string &path) {
+    auto slash=path.find_last_of('/');return path.substr(slash==std::string::npos?0:slash+1);
+}
 uint32_t stable_id(const std::string &path) {
     uint32_t hash=2166136261u;for(unsigned char c:path)hash=(hash^c)*16777619u;return hash?hash:1;
 }
@@ -229,7 +257,7 @@ void dynos_init(void) {
     fs_pathlist_free(&files);std::set<uint32_t> ids;
     for(auto &path:candidates) {
         uint32_t id=stable_id(path);if(!ids.insert(id).second)continue;
-        std::unique_ptr<Entry> entry(new Entry);entry->path=path;entry->id=id;
+        std::unique_ptr<Entry> entry(new Entry);entry->path=path;entry->id=id;entry->pack=pack_path(path);
         auto slash=path.find_last_of('/');std::string file=path.substr(slash==std::string::npos?0:slash+1);
         bool player=false;
         for(const char *slot:{"mario","luigi","wario","waluigi","toad_player","sunshine"})
@@ -245,38 +273,114 @@ void dynos_init(void) {
         if(configDynosModel==id)dynos_player_choice=entries.size()+1;
         labels[entries.size()+1]=entry->label.data();entries.push_back(std::move(entry));
     }
-    DYNOS_LOG("DYNOS_INIT version=3 models=%u npc_targets=%u scope=basic_actor_animations star_hand_trace=1",unsigned(entries.size()),unsigned(npc_entries.size()));
+    std::set<std::string> npc_paths;
+    for(auto &actor:npc_entries)for(auto &entry:actor.second)npc_paths.insert(entry->pack);
+    for(auto &path:npc_paths)if(npc_packs.size()<64){Pack pack;pack.path=path;pack.id=stable_id(path);encode_text(pack.label,pack_name(path));npc_packs.push_back(std::move(pack));}
+    fs_pathlist_t overlays=fs_texture_packs();std::set<std::string> texture_paths;
+    for(int i=0;i<overlays.numpaths;++i)texture_paths.insert(overlays.paths[i]);fs_pathlist_free(&overlays);
+    std::vector<std::string> sorted(texture_paths.begin(),texture_paths.end());
+    std::sort(sorted.begin(),sorted.end(),[](const std::string &a,const std::string &b){int order=sys_strcasecmp(pack_name(a).c_str(),pack_name(b).c_str());return order?order<0:a<b;});
+    for(auto &path:sorted)if(texture_packs.size()<64){Pack pack;pack.path=path;pack.id=stable_id(path);if(pack.id<=1)pack.id+=2;encode_text(pack.label,pack_name(path));texture_packs.push_back(std::move(pack));}
+    std::array<unsigned char,40> label;
+    encode_text(label,"BASE.ZIP");memcpy(base_label,label.data(),40);
+    encode_text(label,"ALL A-Z");memcpy(all_label,label.data(),40);
+    encode_text(label,"VANILLA");memcpy(vanilla_label,label.data(),40);
+    texture_labels[0]=base_label;texture_labels[1]=all_label;npc_labels[0]=vanilla_label;labels[0]=vanilla_label;
+    dynos_texture_choice=configDynosTexturePack==1?1:0;dynos_npc_choice=0;
+    for(size_t i=0;i<texture_packs.size();++i){texture_labels[i+2]=texture_packs[i].label.data();if(texture_packs[i].id==configDynosTexturePack)dynos_texture_choice=i+2;}
+    for(size_t i=0;i<npc_packs.size();++i){npc_labels[i+1]=npc_packs[i].label.data();if(npc_packs[i].id==configDynosNpcPack)dynos_npc_choice=i+1;}
+    dynos_mods_enabled=configModsEnabled?1:0;
+    active={configModsEnabled,dynos_texture_choice,dynos_npc_choice,dynos_player_choice};
+    fs_set_texture_pack(!active.enabled||!active.texture?"":active.texture==1?nullptr:texture_packs[active.texture-2].path.c_str());
+    DYNOS_LOG("DYNOS_INIT version=4 models=%u npc_packs=%u texture_packs=%u scope=mods_menu star_hand_trace=1",unsigned(entries.size()),unsigned(npc_packs.size()),unsigned(texture_packs.size()));
 }
 
-void dynos_update(void) {
-    bool shortcut=pending_step!=0;
-    if(shortcut){int count=int(entries.size()+1);dynos_player_choice=(int(dynos_player_choice)+(pending_step>0?1:count-1))%count;pending_step=0;}
-    if(dynos_player_choice>entries.size())dynos_player_choice=0;
-    if(applied_choice==dynos_player_choice)return;
-    selected_graph=nullptr;applied_choice=dynos_player_choice;
-    if(!applied_choice){configDynosModel=0;if(shortcut)configfile_save(configfile_name());return;}
-    Entry &entry=*entries[applied_choice-1];
-    load_entry(entry);
-    if(entry.graph){selected_graph=entry.graph;configDynosModel=entry.id;}
-    // Keep the ERROR choice visible so the next menu press can move past an
-    // incompatible pack; rendering and saved preference fall back to original.
-    else configDynosModel=0;
-    if(shortcut){configfile_save(configfile_name());DYNOS_LOG("DYNOS_PLAYER_SHORTCUT path=%s",entry.path.c_str());}
+namespace {
+void select_player(unsigned choice) {
+    selected_graph=nullptr;applied_choice=choice;
+    if(active.enabled&&choice&&choice<=entries.size()){
+        Entry &entry=*entries[choice-1];load_entry(entry);selected_graph=entry.graph;
+    }
 }
+void release_models(void) {
+    selected_graph=nullptr;npc_bindings.clear();textures.clear();
+    alloc_only_pool_clear(graph_pool);
+    auto reset=[](Entry &entry){entry.graph=nullptr;entry.animation_overrides.clear();entry.model.reset();entry.failed=false;entry.logged_animation_fallback=false;};
+    for(auto &entry:entries){reset(*entry);encode_label(*entry);}
+    for(auto &actor:npc_entries)for(auto &entry:actor.second)reset(*entry);
+    resident_bytes=0;
+}
+void save_selection(void) {
+    configModsEnabled=active.enabled;
+    configDynosTexturePack=active.texture<2?active.texture:texture_packs[active.texture-2].id;
+    configDynosNpcPack=active.npc?npc_packs[active.npc-1].id:0;
+    configDynosModel=active.player?entries[active.player-1]->id:0;
+    if(active.enabled&&active.player&&entries[active.player-1]->failed)configDynosModel=0;
+    configfile_save(configfile_name());
+}
+}
+void dynos_set_reload_hooks(bool (*begin)(void),void (*end)(void)){begin_reload=begin;end_reload=end;}
+void dynos_request_apply(void) {
+    requested={dynos_mods_enabled!=0,dynos_texture_choice,dynos_npc_choice,dynos_player_choice};
+    if(requested.texture>=dynos_texture_count())requested.texture=0;
+    if(requested.npc>=dynos_npc_pack_count())requested.npc=0;
+    if(requested.player>=dynos_player_count())requested.player=0;
+    apply_requested=true;
+}
+bool dynos_apply_pending(void){return apply_requested;}
+void dynos_update(void) {
+    if(first_update){first_update=false;select_player(active.player);}
+    if(pending_step){
+        if(active.enabled&&!apply_requested){
+            unsigned count=entries.size()+1;
+            active.player=(active.player+(pending_step>0?1:count-1))%count;
+            dynos_player_choice=active.player;select_player(active.player);save_selection();
+            // Keep the original fast shortcut: retain old graphs until the
+            // next explicit Apply instead of reloading the level texture set.
+            DYNOS_LOG("DYNOS_PLAYER_SHORTCUT choice=%u",active.player);
+        }
+        pending_step=0;
+    }
+    if(!apply_requested)return;
+    // The renderer must retire both normal and interpolated GPU work and all
+    // texture-cache keys before the graph arena or BIN storage can be freed.
+    if(!begin_reload||!begin_reload())return;
+    const char *path=!requested.enabled||!requested.texture?"":requested.texture==1?nullptr:texture_packs[requested.texture-2].path.c_str();
+    if(!fs_set_texture_pack(path)){DYNOS_LOG("MODS_APPLY_FAILED reason=texture_pack");apply_requested=false;return;}
+    release_models();active=requested;
+    std::vector<Registered> models;for(auto &pair:registered_models)models.push_back(pair.second);
+    for(auto &model:models)dynos_bind_model(model.model,model.layout,model.original);
+    select_player(active.player);
+    if(end_reload)end_reload();
+    save_selection();apply_requested=false;
+    DYNOS_LOG("MODS_APPLIED enabled=%d texture=%u npc=%u player=%u resident_bytes=%u",active.enabled,active.texture,active.npc,active.player,unsigned(resident_bytes));
+}
+
+unsigned int dynos_texture_count(void){return unsigned(texture_packs.size()+2);}
+const unsigned char **dynos_texture_labels(void){return texture_labels;}
+unsigned int dynos_npc_pack_count(void){return unsigned(npc_packs.size()+1);}
+const unsigned char **dynos_npc_pack_labels(void){return npc_labels;}
+uint64_t dynos_resident_bytes(void){return resident_bytes;}
 
 void dynos_request_player_step(int direction){pending_step=direction;}
-void dynos_clear_npc_bindings(void){npc_bindings.clear();}
+void dynos_clear_npc_bindings(void){npc_bindings.clear();registered_models.clear();}
 void dynos_bind_model(unsigned model,const void *layout,GraphNode *original) {
     for(auto it=npc_bindings.begin();it!=npc_bindings.end();) {
         if(it->second.model==model||it->first==original)it=npc_bindings.erase(it);else ++it;
     }
+    for(auto it=registered_models.begin();it!=registered_models.end();){
+        if(it->first==model||it->second.original==original)it=registered_models.erase(it);else ++it;
+    }
     if(!layout||!original)return;
+    registered_models[model]={model,layout,original};
+    if(!active.enabled||!active.npc)return;
+    const std::string &selected_pack=npc_packs[active.npc-1].path;
     std::vector<Entry*> candidates;const char *actor=nullptr;
     for(const auto &native:native_actors) {
         if(!native.layout||native.layout!=layout)continue;
         auto found=npc_entries.find(native.name);if(found==npc_entries.end())continue;
         actor=native.name;
-        for(auto &entry:found->second)candidates.push_back(entry.get());
+        for(auto &entry:found->second)if(entry->pack==selected_pack)candidates.push_back(entry.get());
     }
     if(candidates.empty())return;
     std::sort(candidates.begin(),candidates.end(),[](Entry *a,Entry *b){return a->path<b->path;});
@@ -311,7 +415,7 @@ GraphNode *dynos_npc_graph_with_animation(GraphNode *original,const Animation *n
     return entry.graph;
 }
 
-GraphNode *dynos_player_graph(GraphNode *original) {return selected_graph?selected_graph:original;}
+GraphNode *dynos_player_graph(GraphNode *original) {return active.enabled&&selected_graph?selected_graph:original;}
 unsigned int dynos_player_count(void) {return unsigned(entries.size()+1);}
 const unsigned char **dynos_player_labels(void) {return labels;}
 
@@ -322,5 +426,5 @@ void *dynos_texture_read(const char *path,uint64_t *size) {
 }
 void dynos_shutdown(void) {
     // Must follow gfx_shutdown: texture-cache keys point into these records.
-    selected_graph=nullptr;npc_bindings.clear();textures.clear();entries.clear();npc_entries.clear();resident_bytes=0;
+    release_models();registered_models.clear();entries.clear();npc_entries.clear();texture_packs.clear();npc_packs.clear();apply_requested=false;first_update=true;applied_choice=~0u;dynos_player_choice=0;pending_step=0;
 }

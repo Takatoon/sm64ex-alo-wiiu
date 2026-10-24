@@ -49,13 +49,13 @@ static fs_walk_result_t pack_dir_walk(void *pack, const char *base, walk_fn_t wa
 static bool pack_dir_is_file(void *pack, const char *fname) {
     char path[SYS_MAX_PATH];
     snprintf(path, sizeof(path), "%s/%s", (const char *)pack, fname);
-    return fs_sys_dir_exists(path);
+    return fs_sys_file_exists(path);
 }
 
 static bool pack_dir_is_dir(void *pack, const char *fname) {
     char path[SYS_MAX_PATH];
     snprintf(path, sizeof(path), "%s/%s", (const char *)pack, fname);
-    return fs_sys_file_exists(path);
+    return fs_sys_dir_exists(path);
 }
 
 static fs_file_t *pack_dir_open(void *pack, const char *vpath) {

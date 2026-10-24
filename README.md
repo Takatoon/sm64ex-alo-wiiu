@@ -270,5 +270,7 @@ the upstream project. For this fork's Wii U workflow, use the guide above.
 
 Build with `DYNOS=1 EXTERNAL_DATA=1`, or pass `--dynos enabled` to the Wii U
 build wizard. Compatible player and NPC BINs can then be installed in the application
-folder without rebuilding. Basic NPC support includes embedded animations for
+folder without rebuilding. Options > MODS selects texture packs, player models
+and one NPC pack; Apply Changes reloads them without restarting the level.
+Basic NPC support includes embedded animations for
 Bob-ombs, Chuckya and Skeeter, and static trailing joints. See [installation and initial compatibility limits](docs/dynos-player-packs.md).

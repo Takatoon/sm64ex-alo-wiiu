@@ -117,6 +117,9 @@ extern bool         configHUD;
 extern bool         configShowFPS;
 #ifdef DYNOS
 extern unsigned int configDynosModel;
+extern bool configModsEnabled;
+extern unsigned int configDynosTexturePack;
+extern unsigned int configDynosNpcPack;
 #endif
 #ifdef MOUSE_ACTIONS
 extern bool         configMouse;

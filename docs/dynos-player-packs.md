@@ -36,11 +36,12 @@ Do not zip a ZIP. File names supported by this first selector are
 replacement can be renamed `mario_geo.bin` without altering its contents.
 
 Restart the application after installing/changing packs. In the pause Options
-menu, open Settings > **DYNOS PLAYER MODEL**. ORIGINAL retains native Mario.
+menu, open **MODS**, choose **PLAYER MODEL**, then **APPLY CHANGES**.
+VANILLA retains native Mario.
 Packs are selected individually as Mario costumes; there is no change to
 physics, hitbox, voice or gameplay. This public-base implementation does not
 include the experimental crouch/D-pad selector. On Wii U, hold physical
-Minus and press D-pad Left/Right to cycle player appearances, including ORIGINAL.
+Minus and press D-pad Left/Right to cycle player appearances, including VANILLA.
 This works with GamePad, Pro Controller, Classic Controller and Wii Remote
 with Nunchuk. Each press changes once; holding the direction does not repeat.
 The chord consumes its direction to avoid changing camera/menu at the same time.
@@ -160,7 +161,7 @@ Capture `DYNOS_INIT`, `DYNOS_LOADED` or `DYNOS_REJECT` messages if a pack is
 missing or rejected. Hardware appearance, texture upload and performance
 validation remain pending.
 
-The complete public-base regression suite passes all 31 tests. Modified core
+The complete public-base regression suite passes all 32 tests. Modified core
 translation units also compile for Wii U with DYNOS=0. Bash syntax and Git
 whitespace checks pass. The test distribution includes two unchanged VC21
 BINs (Mario and Luigi) and the original Sunshine player BIN; it includes no large texture mod.
@@ -176,27 +177,73 @@ not to a Sunshine-specific conversion. Tests cover compressed F32VTX data,
 rounding, truncation, invalid coordinates under fast-math, forward texture
 aliases and cycles, and used versus unused secondary texture coordinates.
 
-## Automatic NPC/actor packs (no priority menu)
+## MODS menu and applying changes
 
-Keep player appearances and actor replacements in the same pack if desired:
+Options > MODS exposes:
+
+- ENABLE MODS: NO / YES. NO uses base textures and native player/NPC models,
+  but keeps the selected packs and player for the next activation.
+- TEXTURE PACK: BASE.ZIP, ALL A-Z, or one mounted texture ZIP/directory.
+  Every non-base pack falls back to base.zip for missing files. ALL searches
+  names alphabetically, ignoring case; later names win on collisions.
+  Identical names use the full path as a deterministic tie-breaker.
+- PLAYER MODEL: VANILLA or a discovered compatible player BIN.
+- NPC PACK: VANILLA or one discovered actor pack. Missing/rejected actors
+  use their native model; another NPC pack is never used implicitly.
+- APPLY CHANGES: commit the staged choices together. Browsing lists does not
+  change resources. Closing the menu saves only the applied configuration.
+
+Defaults are ENABLE MODS=YES, textures=ALL A-Z and NPCs=VANILLA. The previous
+saved player preference is retained. Select an NPC pack explicitly after
+updating from the earlier automatic-NPC build. IDs, rather than list indices,
+are persisted; unavailable choices fall back to base textures/native models.
+
+Recommended application-relative layout:
 
 ```text
-dynos/packs/Low Poly Promo/actors/
-    mario_geo.bin
-    luigi_geo.bin
-    wario_geo.bin
-    peach_geo.bin
-    toad_geo.bin
-    bowser_geo.bin
-    bowser2_geo.bin
+mods/
+    Texture A.zip                 # gfx/... inside the ZIP
+    Texture B/gfx/...             # folders are also supported
+
+dynos/packs/
+    players/Mario DS/mario_geo.bin
+    npcs/SwagSkeleton95/actors/black_bobomb_geo.bin
+    npcs/SwagSkeleton95/actors/goomba_geo.bin
 ```
 
-The `actors/` subfolder and pack name are optional. Loose BINs directly under
-`dynos/packs/` still work, and mounted ZIPs use the same virtual paths. A
-manifest is not required. Player slots remain choices in the existing menu;
-known non-player native actor files apply automatically when their original
-model is registered by the level script. Restart after adding/removing packs.
-Original object behavior, collision, sound and animations remain in use.
+Existing `dynos/packs/PackName/actors/*.bin`, `PackName/*.bin`, root BINs and
+mounted model ZIPs still work. The parent folder identifies an NPC pack;
+`actors/` is optional and is stripped from its group name. Mixed player/NPC
+packs remain usable independently. No manifest or BIN conversion is required.
+Restart after adding/removing/renaming packs to refresh the catalogs.
+
+### Safe runtime apply without level reload
+
+The Apply button captures a selection snapshot. At the next complete frame
+boundary, the graphics hook flushes rendering, waits for GPU completion,
+invalidates the texture cache and the cached options-menu background. If the
+Wii U GPU is unavailable, leave the request pending and retain all resources.
+Then release resident BINs/animation arrays and clear the permanent graph
+arena. Keep the level's original model registrations, rebuild only the chosen
+NPC bindings and player graph, and preload the current world's textures.
+Existing objects, transforms, animation state, collision and level progress
+are not recreated. The loading pause displays APPLYING... in the last menu
+frame; a world reload is not requested. Full precaching is still honored when
+that existing option is enabled.
+
+Texture selection filters only gfx/ resolution. Archives remain mounted so
+open handles, model discovery and other virtual paths stay valid. Base.zip
+is excluded from the override catalog and always remains the texture fallback.
+Both normal file reads and the Wii U fast whole-file loader use the policy.
+Directory file/type predicates and mounting of dotted folder names are fixed
+so loose texture packs obey the same policy as ZIPs.
+
+The physical Minus + Left/Right shortcut still switches the applied player
+without applying other staged settings or rebuilding the world's texture set.
+It retains previously used player resources within the existing memory budget;
+explicit Apply clears those retained resources as well as NPC resources.
+
+## NPC/actor compatibility
 
 The registry covers 225 exported actor geometry symbols from this public port;
 this is a name registry, not a promise that every available mod is compatible.
@@ -206,14 +253,13 @@ new native actor symbols. Unknown names are not installed as replacements.
 Unsupported geometry/callbacks and incompatible animation hierarchies fall
 back to the original. The player-only 20-joint test is not used for NPCs.
 
-For overlapping files with different virtual paths, the first compatible path
-in lexicographic order wins for that actor; invalid earlier candidates are
-logged and skipped. Existing filesystem mount precedence determines which
-file is read if different mounted packs expose exactly the same virtual path.
-There is no activation/priority menu or per-pack configuration in this version.
-Remove or move a pack outside the mounted folders to disable it, then restart.
+Within the selected NPC pack, the first compatible virtual path wins per
+actor. Invalid candidates are logged. Exact virtual-path collisions retain
+the existing filesystem mount precedence for non-texture files. There is no
+NPC pack stack or priority editor; selecting VANILLA disables all replacements.
 
-Model graphs and embedded textures are retained across level transitions.
+Model graphs and embedded textures are retained across level transitions,
+and released/rebuilt by explicit Apply.
 Per-level graph bindings are cleared before level memory is released and
 recreated when native models are registered. Held objects also use the selected
 actor graph. Validation compares joint parentage to the native graph, checks
@@ -223,12 +269,13 @@ still apply. Only known native geometry callbacks are resolved.
 
 The Low Poly Promo Peach, Toad and both Bowser BINs pass independent reader
 checks against the original source hierarchies (21, 20 and 44 joints). Runtime
-tests exercise failed-first-pack fallback, deterministic selection, rebinding
+tests exercise staged selection, pack isolation, GPU-unavailable deferral,
+repeated enable/disable and memory release, deterministic selection, rebinding
 after level unload, model-ID reuse and shortcut selection/persistence. Native
 graph tests cover switches, LODs, empty shadow states and cycles. Platform
 services and graph allocation are stubbed in the runtime test; Wii U visuals,
 NPC cutscenes and controller hardware still require console verification.
-Logs: `DYNOS_INIT version=3`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
+Logs: `DYNOS_INIT version=4`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
 `DYNOS_PLAYER_SHORTCUT`. The TCP log receiver is not stopped by this feature.
 
 With DynOS enabled, Wii Remote Minus is reserved for the model modifier rather than the legacy N64 L binding.
@@ -318,7 +365,7 @@ counts before use. Empty NULL table slots are legal. Zero-duration legacy
 placeholders may be retained unused, but cannot drive a custom skeleton.
 The existing model and resident-memory budgets include animation allocations.
 
-Validation: 31 automated regressions pass; all 67 original Swag BINs were
+Validation: 32 automated regressions pass; all 67 original Swag BINs were
 inspected (62 accepted, five known rejections listed above). DS Mario, DS Luigi,
 Sunshine and all three Low Poly Promo players still pass the reader. A native
 probe checks all frames/channels for the two Bob-ombs, Chuckya and Skeeter
@@ -332,3 +379,10 @@ python3 tools/tests/check_dynos_actor_animations.py /path/to/swag-replacements-v
 
 Wii U compilation and a DYNOS=0 renderer compile are checked. Visual behavior
 and performance of this extension still need console verification.
+
+MODS validation also exercises BASE/individual/ALL priority, sparse-pack
+fallback, loose folders (including dotted names), existing open handles,
+model ZIP availability while textures are disabled, and saved settings with
+mods disabled. Original model registration reuse and level clears are checked
+to prevent reattaching stale level graphs. The full Wii U build and modified
+DYNOS=0 translation units compile. Console visuals remain unverified.
