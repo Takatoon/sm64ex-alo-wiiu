@@ -265,3 +265,9 @@ the upstream project. For this fork's Wii U workflow, use the guide above.
  * This fork's WUHB-adjacent save, config, and mod directories are documented in [docs/wiiu-storage-layout.md](docs/wiiu-storage-layout.md).
  * To build for 3DS, [click here](https://github.com/sm64-port/sm64_3ds/blob/master/README.md). (TARGET_N3DS=1)
  * To build for Switch, [click here](https://github.com/fgsfdsfgs/sm64ex/blob/switch/README.md). (TARGET_SWITCH=1)
+
+## Optional DynOS player packs
+
+Build with `DYNOS=1 EXTERNAL_DATA=1`, or pass `--dynos enabled` to the Wii U
+build wizard. Compatible player BINs can then be installed in the application
+folder without rebuilding. See [installation and initial compatibility limits](docs/dynos-player-packs.md).

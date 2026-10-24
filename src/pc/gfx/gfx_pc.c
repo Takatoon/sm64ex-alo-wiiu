@@ -5,6 +5,9 @@
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
+#ifdef DYNOS
+#include "pc/dynos/dynos.h"
+#endif
 
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
 #include <PR/os_time.h>
@@ -783,7 +786,11 @@ static inline void load_texture(const char *fullpath) {
     const bool profile_runtime = gfx_preload_depth == 0;
     const uint64_t profile_begin_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
 #endif
-    u8 *imgdata = fs_load_file(fullpath, &imgsize);
+    u8 *imgdata = NULL;
+#ifdef DYNOS
+    imgdata = dynos_texture_read(fullpath, &imgsize);
+#endif
+    if (!imgdata) imgdata = fs_load_file(fullpath, &imgsize);
 #if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     const uint64_t profile_read_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
 #endif

@@ -29,6 +29,18 @@ TARGET_RPI ?= 0
 TARGET_WEB ?= 0
 # Build for the Wii U
 TARGET_WII_U ?= 0
+DYNOS ?= 0
+$(eval $(call validate-option,DYNOS,0 1))
+ifeq ($(DYNOS),1)
+  ifeq ($(TARGET_N64),1)
+    $(error DYNOS requires a port target)
+  endif
+  ifneq ($(EXTERNAL_DATA),1)
+    $(error DYNOS requires EXTERNAL_DATA=1)
+  endif
+  # A permanent graph arena must survive level-pool resets.
+  DEFINES += DYNOS=1 USE_SYSTEM_MALLOC=1
+endif
 # Keep the original Wii U layout at the SD root instead of storing mutable
 # data beside the running WUHB/RPX.
 WIIU_LEGACY_PATHS ?= 0
@@ -596,6 +608,9 @@ LEVEL_DIRS     := $(patsubst levels/%,%,$(dir $(wildcard levels/*/header.h)))
 
 # Directories containing source files
 SRC_DIRS := src src/engine src/game src/audio src/menu src/buffers src/extras actors levels bin bin/$(VERSION) data assets sound
+ifeq ($(DYNOS),1)
+  SRC_DIRS += src/pc/dynos
+endif
 BOOT_DIR := src/boot
 ifeq ($(TARGET_N64),1)
   SRC_DIRS += asm lib src/extras/n64

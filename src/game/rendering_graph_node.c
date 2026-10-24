@@ -10,6 +10,11 @@
 #include "print.h"
 #include "rendering_graph_node.h"
 #include "shadow.h"
+#ifdef DYNOS
+#include "pc/dynos/dynos.h"
+#include "mario_misc.h"
+#include "object_list_processor.h"
+#endif
 
 #include "config.h"
 #include "config/config_world.h"
@@ -1213,11 +1218,17 @@ void geo_process_object(struct Object *node) {
         if (obj_is_in_view(&node->header.gfx, gMatStack[gMatStackIndex + 1])) {
             inc_mat_stack();
 
-            if (node->header.gfx.sharedChild != NULL) {
+            struct GraphNode *sharedChild = node->header.gfx.sharedChild;
+#ifdef DYNOS
+            if (node == gMarioObject || (void *) node == (void *) &gMirrorMario)
+                sharedChild = dynos_player_graph(sharedChild);
+            else sharedChild = dynos_npc_graph(sharedChild);
+#endif
+            if (sharedChild != NULL) {
                 gCurGraphNodeObject = (struct GraphNodeObject *) node;
-                node->header.gfx.sharedChild->parent = &node->header.gfx.node;
-                geo_process_node_and_siblings(node->header.gfx.sharedChild);
-                node->header.gfx.sharedChild->parent = NULL;
+                sharedChild->parent = &node->header.gfx.node;
+                geo_process_node_and_siblings(sharedChild);
+                sharedChild->parent = NULL;
                 gCurGraphNodeObject = NULL;
             }
             if (node->header.gfx.node.children != NULL) {
@@ -1311,7 +1322,11 @@ void geo_process_held_object(struct GraphNodeHeldObject *node) {
             geo_set_animation_globals(&node->objNode->header.gfx.animInfo, (node->objNode->header.gfx.node.flags & GRAPH_RENDER_HAS_ANIMATION) != 0);
         }
 
-        geo_process_node_and_siblings(node->objNode->header.gfx.sharedChild);
+        struct GraphNode *heldChild=node->objNode->header.gfx.sharedChild;
+#ifdef DYNOS
+        heldChild=dynos_npc_graph(heldChild);
+#endif
+        geo_process_node_and_siblings(heldChild);
         gCurGraphNodeHeldObject = NULL;
         gCurrAnimType = tempType;
         gCurrAnimEnabled = tempEnabled;

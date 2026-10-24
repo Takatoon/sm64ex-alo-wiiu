@@ -1,5 +1,6 @@
 #ifndef TEXT_OPTIONS_STRINGS_H
 #define TEXT_OPTIONS_STRINGS_H
+#define TEXT_OPT_DYNOS_MODEL _("DYNOS PLAYER MODEL")
 
 /* Extended options menu text */
 

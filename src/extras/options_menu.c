@@ -18,6 +18,10 @@
 #include "draw_util.h"
 
 #include "pc/configfile.h"
+#ifdef DYNOS
+#include "pc/dynos/dynos.h"
+static const u8 dynosModelLabel[] = { TEXT_OPT_DYNOS_MODEL };
+#endif
 
 #ifndef TARGET_N64
 #include "pc/pc_main.h"
@@ -308,6 +312,10 @@ static struct SubMenu menuHud = DEF_SUBMENU( optsSettingsStr[0], optsHud );
 #endif
 
 static struct Option optsSettings[] = {
+#ifdef DYNOS
+    { .type = OPT_CHOICE, .label = dynosModelLabel, .uval = &dynos_player_choice,
+      .choices = NULL, .numChoices = 1 },
+#endif
 #ifndef TARGET_N64
     DEF_OPT_SUBMENU( optsSettingsStr[0], &menuHud ),
 #else
@@ -532,6 +540,10 @@ static inline s16 get_hudstr_centered_x(const s16 sx, const u8 *str) {
 
 //Options menu
 void optmenu_draw(void) {
+#ifdef DYNOS
+    optsSettings[0].choices = dynos_player_labels();
+    optsSettings[0].numChoices = dynos_player_count();
+#endif
     u8 i;
     s16 scroll;
     s16 scrollpos;
@@ -621,6 +633,10 @@ void optmenu_toggle(void) {
 }
 
 void optmenu_check_buttons(void) {
+#ifdef DYNOS
+    optsSettings[0].choices = dynos_player_labels();
+    optsSettings[0].numChoices = dynos_player_count();
+#endif
 #if !defined(TARGET_N64) && !defined(TARGET_PORT_CONSOLE)
     if (optmenu_binding) {
         u32 key = controller_get_raw_key();

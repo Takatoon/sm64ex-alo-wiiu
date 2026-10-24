@@ -115,6 +115,9 @@ extern ConfigPuppyCam configPuppyCam;
 
 extern bool         configHUD;
 extern bool         configShowFPS;
+#ifdef DYNOS
+extern unsigned int configDynosModel;
+#endif
 #ifdef MOUSE_ACTIONS
 extern bool         configMouse;
 #endif

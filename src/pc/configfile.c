@@ -112,6 +112,9 @@ bool configDiscordRPC = true;
 bool configSkipIntro = false;
 bool configHUD = true;
 bool configShowFPS = false;
+#ifdef DYNOS
+unsigned int configDynosModel = 0;
+#endif
 
 #if MORE_VANILLA_CAM_STUFF
 ConfigVanillaCam configVanillaCam = {
@@ -196,6 +199,9 @@ static const struct ConfigOption options[] = {
     #endif
     {.name = "skip_intro",           .type = CONFIG_TYPE_BOOL, .boolValue = &configSkipIntro},
     {.name = "show_fps",             .type = CONFIG_TYPE_BOOL, .boolValue = &configShowFPS},
+#ifdef DYNOS
+    {.name = "dynos_model",          .type = CONFIG_TYPE_UINT, .uintValue = &configDynosModel},
+#endif
 #if MORE_VANILLA_CAM_STUFF
     {.name = "vanillacam_parallel",     .type = CONFIG_TYPE_BOOL, .boolValue = &configVanillaCam.parallel},  
     {.name = "vanillacam_srmario",      .type = CONFIG_TYPE_BOOL, .boolValue = &configVanillaCam.srMario},

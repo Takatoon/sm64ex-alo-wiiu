@@ -56,6 +56,9 @@
 #endif
 
 #include "fs/fs.h"
+#ifdef DYNOS
+#include "dynos/dynos.h"
+#endif
 
 #include "game/game_init.h"
 #include "game/main.h"
@@ -139,6 +142,9 @@ static inline void audio_frame(void) {
 #endif
 
 void produce_one_frame(void) {
+#ifdef DYNOS
+    dynos_update();
+#endif
     gfx_start_frame();
 
     change_audio_volumes();
@@ -183,6 +189,9 @@ void game_deinit(void) {
     controller_shutdown();
     audio_shutdown();
     gfx_shutdown();
+#ifdef DYNOS
+    dynos_shutdown();
+#endif
 #endif
     inited = false;
 }
@@ -375,6 +384,9 @@ void main_func(void) {
     ;
 
     gfx_init(wm_api, rendering_api, window_title);
+#ifdef DYNOS
+    dynos_init();
+#endif
     #ifndef TARGET_PORT_CONSOLE
     wm_api->set_keyboard_callbacks(keyboard_on_key_down, keyboard_on_key_up, keyboard_on_all_keys_up);
     #endif
