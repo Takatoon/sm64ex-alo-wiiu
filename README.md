@@ -174,7 +174,8 @@ In **Options > MODS**, select:
 Select **Apply Changes** to activate the choices together. Applying changes may
 pause while resources reload, but preserves the current level and progress.
 On Wii U, hold **Minus (-)** and press **D-pad Left/Right** to change the player
-model directly, including a return to vanilla Mario.
+model directly, skipping models rejected by the loader and including a return
+to vanilla Mario.
 
 Support is partial: player models use Mario's original skeleton and animations.
 Selected NPCs (Bob-ombs, Chuckya and Skeeter) can use different joint counts
