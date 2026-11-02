@@ -46,7 +46,28 @@ Set `WIIU_LEGACY_PATHS=1` only when a build must retain the previous layout:
 sd:/sm64config.txt
 sd:/sm64_save_file.bin
 sd:/sm64ex_res/
+├── texture-pack.zip
+└── dynos/packs/
+    ├── players/Mario DS/mario_geo.bin
+    └── npcs/SwagSkeleton95/actors/goomba_geo.bin
 ```
+
+For DynOS builds, all external legacy resources live under `sd:/sm64ex_res/`:
+texture/model ZIPs go directly in that directory and loose models go in
+`sd:/sm64ex_res/dynos/packs/`. The SD root remains available for the existing
+save and configuration files, but is never recursively scanned for models.
+Loose textures at `sd:/gfx/` and models at `sd:/dynos/` are not used in this
+mode. There is no compatibility fallback to `sd:/dynos/`, including through
+generic DynOS file lookups. Recursive root enumeration also skips the SD root. Move an existing legacy `sd:/dynos/` directory into `sd:/sm64ex_res/`
+without changing its contents. The application does not move user files.
+
+The default Aroma Beta 11 layout keeps loose models in `dynos/packs/` beside
+the executable and ZIP packs in the adjacent `mods/` directory. Both layouts
+expose the same virtual model path, `dynos/packs/`, so model IDs are preserved
+when moving an old legacy root-level `dynos/` directory to its new location.
+Model ZIPs retain their internal folder layouts. A `dynos/` directory is not
+mounted a second time as an alias; loose files are read only through their
+layout's canonical resource root. Adding/renaming packs requires a restart.
 
 The root build wizard exposes this as **SD card root (legacy)** under
 **Storage layout**. For automation:

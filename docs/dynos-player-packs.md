@@ -16,7 +16,8 @@ arena. Use a clean build or a separate `BUILD_DIR_BASE` after changing flags.
 
 ## Install models without rebuilding
 
-Copy original, unconverted DynOS binaries into the application folder:
+For the default Aroma Beta 11 layout, copy original, unconverted DynOS binaries
+into the application folder:
 
 ```text
 SD:/wiiu/apps/sm64-dynos-test/
@@ -27,7 +28,13 @@ SD:/wiiu/apps/sm64-dynos-test/
     mods/your-texture-pack.zip
 ```
 
-Alternatively, put a model ZIP directly in `mods/`. Its virtual paths can be
+For `WIIU_LEGACY_PATHS=1`, put those same model directories under
+`SD:/sm64ex_res/dynos/packs/` and texture/model ZIPs in `SD:/sm64ex_res/`.
+An old `SD:/dynos/` folder must be moved inside `SD:/sm64ex_res/`; the game does
+not move files automatically. Save/configuration locations remain at the SD
+root. See [both storage layouts](wiiu-storage-layout.md).
+
+Alternatively, in the default layout, put a model ZIP directly in `mods/`. Its virtual paths can be
 `PackName/mario_geo.bin` or `dynos/packs/PackName/mario_geo.bin`. ZIPs nested
 inside `dynos/packs/` are not automatically mounted: use loose folders there.
 Do not zip a ZIP. File names supported by this first selector are
@@ -161,7 +168,7 @@ Capture `DYNOS_INIT`, `DYNOS_LOADED` or `DYNOS_REJECT` messages if a pack is
 missing or rejected. Hardware appearance, texture upload and performance
 validation remain pending.
 
-The complete public-base regression suite passes all 32 tests. Modified core
+The complete public-base regression suite passes all 33 tests. Modified core
 translation units also compile for Wii U with DYNOS=0. Bash syntax and Git
 whitespace checks pass. The test distribution includes two unchanged VC21
 BINs (Mario and Luigi) and the original Sunshine player BIN; it includes no large texture mod.
@@ -198,7 +205,7 @@ saved player preference is retained. Select an NPC pack explicitly after
 updating from the earlier automatic-NPC build. IDs, rather than list indices,
 are persisted; unavailable choices fall back to base textures/native models.
 
-Recommended application-relative layout:
+Recommended application-relative layout for Aroma Beta 11:
 
 ```text
 mods/
@@ -211,11 +218,29 @@ dynos/packs/
     npcs/SwagSkeleton95/actors/goomba_geo.bin
 ```
 
-Existing `dynos/packs/PackName/actors/*.bin`, `PackName/*.bin`, root BINs and
-mounted model ZIPs still work. The parent folder identifies an NPC pack;
+Existing loose `dynos/packs/PackName/actors/*.bin`,
+`dynos/packs/PackName/*.bin`, BINs directly in `dynos/packs/`, and mounted model
+ZIPs still work. The parent folder identifies an NPC pack;
 `actors/` is optional and is stripped from its group name. Mixed player/NPC
 packs remain usable independently. No manifest or BIN conversion is required.
 Restart after adding/removing/renaming packs to refresh the catalogs.
+
+### Scoped discovery in both storage modes
+
+Only loose `*_geo*.bin` files below the canonical `dynos/packs/` tree are
+considered: application-relative for Aroma Beta 11, or relative to
+`SD:/sm64ex_res/` in legacy mode. Already-mounted non-base archives are checked
+using their in-memory directory index, preserving existing ZIP-internal
+layouts such as `PackName/mario_geo.bin`. Identical virtual paths are deduplicated;
+normal mount precedence selects the data. Base.zip is not scanned for models.
+
+The scoped model-file reader uses the same permitted roots and rejects
+absolute/parent-traversal paths, including for related pack files. The SD root
+is kept mounted for saves/configuration but cannot shadow a canonical legacy
+model. Generic legacy `dynos/` lookups also exclude the SD root; there is no
+legacy fallback to `SD:/dynos/`. No recursive model walk starts at the SD root. Files elsewhere in the
+application/resources tree are not loosely discovered as models. These file
+access rules do not by themselves implement Lua execution or external voices.
 
 ### Safe runtime apply without level reload
 
@@ -365,7 +390,7 @@ counts before use. Empty NULL table slots are legal. Zero-duration legacy
 placeholders may be retained unused, but cannot drive a custom skeleton.
 The existing model and resident-memory budgets include animation allocations.
 
-Validation: 32 automated regressions pass; all 67 original Swag BINs were
+Validation: 33 automated regressions pass; all 67 original Swag BINs were
 inspected (62 accepted, five known rejections listed above). DS Mario, DS Luigi,
 Sunshine and all three Low Poly Promo players still pass the reader. A native
 probe checks all frames/channels for the two Bob-ombs, Chuckya and Skeeter
@@ -386,3 +411,9 @@ model ZIP availability while textures are disabled, and saved settings with
 mods disabled. Original model registration reuse and level clears are checked
 to prevent reattaching stale level graphs. The full Wii U build and modified
 DYNOS=0 translation units compile. Console visuals remain unverified.
+
+Storage-layout regressions run in both modes with a physical-directory walk
+spy: exactly one canonical dynos/packs tree is traversed. They check root-level
+decoys cannot override legacy models, duplicate ZIP paths appear once, model
+ZIPs still work, unsafe paths are rejected, related pack files can be opened
+from the canonical root, and root-level configuration remains accessible.

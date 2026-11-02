@@ -200,7 +200,7 @@ bool load_entry(Entry &entry,const std::vector<int> *hierarchy=nullptr) {
     if(entry.failed)return false;
     if(entry.model)return !hierarchy||entry.model->compatible_hierarchy==*hierarchy;
     auto bank=native_animations(entry.slot);
-    fs_file_t *file=fs_open(entry.path.c_str());std::string error;
+    fs_file_t *file=fs_open_model(entry.path.c_str());std::string error;
     if(file) {
         auto size=fs_size(file);
         if(size>0&&size<=32*1024*1024) {
@@ -244,9 +244,9 @@ bool load_entry(Entry &entry,const std::vector<int> *hierarchy=nullptr) {
 void dynos_init(void) {
     labels[0]=original_label;
     graph_pool=alloc_only_pool_init();
-    // Includes loose dynos/packs folders and ZIPs mounted by the existing mods
-    // filesystem. Enumeration is sorted/deduplicated before assigning labels.
-    fs_pathlist_t files=fs_enumerate("",true);std::set<std::string> candidates;
+    // Only the canonical dynos/packs tree and mounted model ZIPs are scanned.
+    // In legacy mode the canonical root is SD:/sm64ex_res, not the whole SD.
+    fs_pathlist_t files=fs_enumerate_models();std::set<std::string> candidates;
     for(int i=0;i<files.numpaths;i++) {
         std::string path=files.paths[i];
         while(!path.empty()&&path[0]=='/')path.erase(0,1);
