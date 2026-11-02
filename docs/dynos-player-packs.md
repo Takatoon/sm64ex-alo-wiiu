@@ -97,6 +97,16 @@ An incompatible selected pack displays ERROR in the choice list, logs its
 reason and renders original Mario. You can continue to the next choice. The
 failed pack is not saved as the active model.
 
+## Known material limitation
+
+The current renderer evaluates only the first combiner cycle. Loading a model
+with two texture slots does not imply full support for two-cycle materials.
+Galaxy Mario Recolor uses grayscale masks with a second color-combiner stage
+for its skin; those materials can therefore appear gray or incorrectly colored
+even when the BIN and its embedded textures load successfully. Adding separate
+PNG files does not supply the missing stage. No renderer extension for these
+materials is included in this integration.
+
 ## Memory, rendering and persistence
 
 Models are discovered at startup, sorted and deduplicated. The saved preference
