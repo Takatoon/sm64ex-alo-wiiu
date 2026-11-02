@@ -46,7 +46,8 @@ Restart the application after installing/changing packs. In the pause Options
 menu, open **MODS**, choose **PLAYER MODEL**, then **APPLY CHANGES**.
 VANILLA retains native Mario.
 Packs are selected individually as Mario costumes; there is no change to
-physics, hitbox, voice or gameplay. This public-base implementation does not
+physics, hitbox or gameplay. Optional external voices follow the selected model;
+see the [player voice guide](dynos-player-voices.md). This implementation does not
 include the experimental crouch/D-pad selector. On Wii U, hold physical
 Minus and press D-pad Left/Right to cycle player appearances, including VANILLA.
 This works with GamePad, Pro Controller, Classic Controller and Wii Remote
@@ -80,10 +81,11 @@ renderer; experimental DDS/GPU profiling changes are not included here.
   inherits that slot's default palette/name).
 
 Player animation tables remain unused. Supported custom NPC hierarchies can
-use embedded animation tables as described below. There is no Lua,
-Character Select execution, new actions, custom voices, runtime C-source
-compiler or custom actions. Named actor replacements, including supported
-NPCs and native cap actors, normally use the original actor animations; the
+use embedded animation tables as described below. There is no Lua execution,
+Character Select runtime, new actions or runtime C-source compiler. Static
+Character Select-style voice tables and external Ogg Vorbis player clips are
+supported as described in the [voice guide](dynos-player-voices.md).
+Named actor replacements, including supported NPCs and native cap actors, normally use the original actor animations; the
 basic custom NPC path below uses validated embedded animations for drawing. Newer raw/external
 texture records, unsupported callbacks/commands and an unsupported animation
 hierarchy are rejected. F32VTX decimal coordinates are decoded from IEEE754
@@ -250,7 +252,8 @@ is kept mounted for saves/configuration but cannot shadow a canonical legacy
 model. Generic legacy `dynos/` lookups also exclude the SD root; there is no
 legacy fallback to `SD:/dynos/`. No recursive model walk starts at the SD root. Files elsewhere in the
 application/resources tree are not loosely discovered as models. These file
-access rules do not by themselves implement Lua execution or external voices.
+access rules also scope the static Lua voice-table reader and related Ogg files
+to the selected pack; they do not enable Lua execution.
 
 ### Safe runtime apply without level reload
 
@@ -310,7 +313,7 @@ after level unload, model-ID reuse and shortcut selection/persistence. Native
 graph tests cover switches, LODs, empty shadow states and cycles. Platform
 services and graph allocation are stubbed in the runtime test; Wii U visuals,
 NPC cutscenes and controller hardware still require console verification.
-Logs: `DYNOS_INIT version=4`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
+Logs: `DYNOS_INIT version=5`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
 `DYNOS_PLAYER_SHORTCUT`. The TCP log receiver is not stopped by this feature.
 
 With DynOS enabled, Wii Remote Minus is reserved for the model modifier rather than the legacy N64 L binding.

@@ -15,13 +15,14 @@ WORKDIR /workspace
 COPY --from=librpxloader /artifacts ${DEVKITPRO}
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bsdextrautils python3-numpy python3-pil \
+    && apt-get install -y --no-install-recommends bsdextrautils python3-numpy python3-pil libvorbis-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN powerpc-eabi-gcc --version \
     && test -f "${WUT_ROOT}/share/wut.specs" \
     && test -d "${DEVKITPRO}/portlibs/wiiu/include/SDL2" \
     && test -f "${DEVKITPRO}/wums/include/rpxloader/rpxloader.h" \
-    && test -f "${DEVKITPRO}/wums/lib/librpxloader.a"
+    && test -f "${DEVKITPRO}/wums/lib/librpxloader.a" \
+    && test -f "${DEVKITPRO}/portlibs/ppc/lib/libvorbisfile.a"
 
 CMD ["bash"]

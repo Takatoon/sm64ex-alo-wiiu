@@ -38,6 +38,8 @@ It adds a Docker-based build workflow, improves external texture-pack loading, a
 
 * Added optional, partial DynOS support for player models and NPC/actor packs, including selected NPCs with custom skeletons and embedded animations.
 
+* Added optional external player voices from Ogg Vorbis files and static Character Select-style `CHAR_SOUND_*` tables, following the selected DynOS model without recompiling voice banks.
+
 * Added an **Options > MODS** menu to enable/disable mods, select textures, a player model and one NPC pack, and apply changes without restarting the level. Hold **Minus (-) + D-pad Left/Right** to cycle player models.
 
 
@@ -177,8 +179,13 @@ model directly, including a return to vanilla Mario.
 Support is partial: player models use Mario's original skeleton and animations.
 Selected NPCs (Bob-ombs, Chuckya and Skeeter) can use different joint counts
 with compatible embedded animations; other compatible NPCs can have static
-extra joints at the end of their skeleton. Arbitrary skeletons, Lua scripts,
-Character Select behavior, custom actions and custom voices are not supported.
+extra joints at the end of their skeleton. Arbitrary skeletons, Lua execution,
+Character Select behavior and custom actions are not supported. Static
+`CHAR_SOUND_*` voice tables can be read from a pack's Lua files without running
+Lua; the selected player's Ogg Vorbis voices load from its `sound/` folder.
+Missing or invalid clips retain the native voice. See the
+[player voice guide](docs/dynos-player-voices.md) for the layout and supported
+Lua data forms. Voices are separate files, not part of the model BIN.
 Some two-cycle materials, including those in Galaxy Mario Recolor, may display
 incorrect colors. High-polygon models can reduce performance on Wii U.
 

@@ -19,6 +19,9 @@
 #include "game/memory.h"
 #include "game/sound_init.h"
 #include "audio/external.h"
+#ifdef DYNOS
+#include "dynos/dynos_voice.h"
+#endif
 
 #include "gfx/gfx_pc.h"
 
@@ -135,6 +138,10 @@ static inline void audio_frame(void) {
     static s16 audio_buffer[SAMPLES_HIGH * 2 * 2];
     for (int i = 0; i < 2; i++) {
         create_next_audio_buffer(audio_buffer + i * (num_audio_samples * 2), num_audio_samples);
+#ifdef DYNOS
+        dynos_voice_mix(audio_buffer + i * (num_audio_samples * 2), num_audio_samples,
+            ((float)configMasterVolume / MAX_VOLUME) * ((float)configSfxVolume / MAX_VOLUME));
+#endif
     }
 
     audio_api->play((u8 *)audio_buffer, 2 * num_audio_samples * 4);
