@@ -1039,6 +1039,11 @@ ifeq ($(SDL1_USED)$(SDL2_USED),11)
   $(error Cannot link both SDL1 and SDL2 at the same time)
 endif
 
+# External DynOS voice clips are decoded when selecting a player model.
+ifeq ($(DYNOS),1)
+  BACKEND_LDFLAGS += -lvorbisfile -lvorbis -logg
+endif
+
 # SDL can be used by different systems, so we consolidate all of that shit into this
 
 ifeq ($(SDL2_USED),1)

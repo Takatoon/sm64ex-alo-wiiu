@@ -11,6 +11,11 @@ static fs_walk_result_t scoped_walk(void *pack,const char *base,walk_fn_t callba
     assert(!strcmp(base,"dynos/packs")&&recursive);++walks;
     return real_walk(pack,base,callback,user,recursive);
 }
+static fs_walk_result_t script_walk(void *pack,const char *base,walk_fn_t callback,void *user,bool recursive){
+    assert(!strcmp((const char*)pack,resources));
+    assert(!strcmp(base,"dynos/packs/Loose")&&!recursive);++walks;
+    return real_walk(pack,base,callback,user,recursive);
+}
 static char first(const char *path){
     fs_file_t *file=fs_open_model(path);assert(file);char c;assert(fs_read(file,&c,1)==1);fs_close(file);return c;
 }
@@ -43,6 +48,12 @@ int main(int argc,char **argv){
     assert(loose==1&&zip==1&&manta==1);fs_pathlist_free(&files);
     assert(first("dynos/packs/Loose/mario_geo.bin")=='L');
     assert(first("dynos/packs/Loose/main.lua")=='S');
+    walks=0;fs_packtype_dir.walk=script_walk;
+    fs_pathlist_t scripts=fs_enumerate_model_scripts("dynos/packs/Loose");fs_packtype_dir.walk=real_walk;
+    assert(walks==1&&scripts.numpaths==1&&!strcmp(scripts.paths[0],"dynos/packs/Loose/main.lua"));fs_pathlist_free(&scripts);
+    scripts=fs_enumerate_model_scripts("Classic");assert(scripts.numpaths==1&&!strcmp(scripts.paths[0],"Classic/main.lua"));fs_pathlist_free(&scripts);
+    assert(first("Classic/sound/jump.ogg")=='V');
+    scripts=fs_enumerate_model_scripts("../escape");assert(scripts.numpaths==0);fs_pathlist_free(&scripts);
     assert(first("dynos/packs/Loose/sound/jump.ogg")=='V');
     assert(first("Classic/luigi_geo.bin")=='Z');
     assert(!fs_open_model("outside/luigi_geo.bin"));

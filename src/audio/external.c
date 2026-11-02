@@ -13,6 +13,9 @@
 #include "seq_ids.h"
 #include "dialog_ids.h"
 #include "level_table.h"
+#ifdef DYNOS
+#include "pc/dynos/dynos_voice.h"
+#endif
 
 #if defined(VERSION_EU) || defined(VERSION_SH) || defined(VERSION_CN)
 #define EU_FLOAT(x) x##f
@@ -1705,6 +1708,23 @@ static void update_game_sound(void) {
                             break;
                     }
                 }
+#ifdef DYNOS
+                /* Use the sound selected by native priorities, not every queued
+                 * play_sound request. Native sequencing continues silently for
+                 * replaced events; custom clips have their own sample length. */
+                if ((bank == SOUND_BANK_VOICE || (bank == SOUND_BANK_MENU && soundId == 0x24))
+                    && dynos_voice_event(sSoundBanks[bank][soundIndex].soundBits,
+                        sSoundBanks[bank][soundIndex].x, soundStatus == SOUND_STATUS_WAITING,
+                        bank == SOUND_BANK_MENU ? 1.0f : get_sound_volume(bank, soundIndex, VOLUME_RANGE_UNK1),
+                        gSoundMode == SOUND_MODE_MONO ? 0.5f : get_sound_pan(*sSoundBanks[bank][soundIndex].x, *sSoundBanks[bank][soundIndex].z),
+                        get_sound_freq_scale(bank, soundIndex))) {
+#if defined(VERSION_EU) || defined(VERSION_SH) || defined(VERSION_CN)
+                    func_802ad728(0x02020000 | ((channelIndex & 0xff) << 8), 0.0f);
+#else
+                    gSequencePlayers[SEQ_PLAYER_SFX].channels[channelIndex]->volume = 0.0f;
+#endif
+                }
+#endif
             }
 
             // Increment to the next channel that this bank owns
@@ -2104,6 +2124,9 @@ static u8 begin_background_music_fade(u16 fadeDuration) {
  * Called from threads: thread5_game_loop
  */
 void set_audio_muted(u8 muted) {
+#ifdef DYNOS
+    dynos_voice_set_muted(muted != 0);
+#endif
     u8 i;
 
     for (i = 0; i < SEQUENCE_PLAYERS; i++) {
@@ -2123,6 +2146,11 @@ void set_audio_muted(u8 muted) {
  * Called from threads: thread4_sound
  */
 void sound_init(void) {
+#ifdef DYNOS
+    dynos_voice_stop_bank(SOUND_BANK_VOICE);
+    dynos_voice_stop_bank(SOUND_BANK_MENU);
+    dynos_voice_set_muted(false);
+#endif
     u8 i;
     u8 j;
 
@@ -2208,6 +2236,9 @@ void get_currently_playing_sound(u8 bank, u8 *numPlayingSounds, u8 *numSoundsInB
  * Called from threads: thread5_game_loop
  */
 void stop_sound(u32 soundBits, f32 *pos) {
+#ifdef DYNOS
+    dynos_voice_stop(soundBits, pos);
+#endif
     u8 bank = (soundBits & SOUNDARGS_MASK_BANK) >> SOUNDARGS_SHIFT_BANK;
     u8 soundIndex = sSoundBanks[bank][0].next;
 
@@ -2231,6 +2262,9 @@ void stop_sound(u32 soundBits, f32 *pos) {
  * Called from threads: thread5_game_loop
  */
 void stop_sounds_from_source(f32 *pos) {
+#ifdef DYNOS
+    dynos_voice_stop_source(pos);
+#endif
     u8 bank;
     u8 soundIndex;
 
@@ -2250,6 +2284,9 @@ void stop_sounds_from_source(f32 *pos) {
  * Called from threads: thread3_main, thread5_game_loop
  */
 static void stop_sounds_in_bank(u8 bank) {
+#ifdef DYNOS
+    dynos_voice_stop_bank(bank);
+#endif
     u8 soundIndex = sSoundBanks[bank][0].next;
 
     while (soundIndex != 0xff) {
@@ -2276,6 +2313,10 @@ void stop_sounds_in_continuous_banks(void) {
  * Called from threads: thread3_main, thread5_game_loop
  */
 void sound_banks_disable(UNUSED u8 player, u16 bankMask) {
+#ifdef DYNOS
+    if (bankMask & (1 << SOUND_BANK_VOICE)) dynos_voice_stop_bank(SOUND_BANK_VOICE);
+    if (bankMask & (1 << SOUND_BANK_MENU)) dynos_voice_stop_bank(SOUND_BANK_MENU);
+#endif
     u8 i;
 
     for (i = 0; i < SOUND_BANK_COUNT; i++) {
@@ -2290,6 +2331,10 @@ void sound_banks_disable(UNUSED u8 player, u16 bankMask) {
  * Called from threads: thread5_game_loop
  */
 static void disable_all_sequence_players(void) {
+#ifdef DYNOS
+    dynos_voice_stop_bank(SOUND_BANK_VOICE);
+    dynos_voice_stop_bank(SOUND_BANK_MENU);
+#endif
     u8 i;
 
     for (i = 0; i < SEQUENCE_PLAYERS; i++) {

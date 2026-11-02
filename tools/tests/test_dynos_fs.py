@@ -34,6 +34,7 @@ class DynosFilesystemTest(unittest.TestCase):
                     resources/'dynos/packs/Loose/mario_geo.bin':b'L',
                     resources/'dynos/packs/Sea/manta_seg5_geo_05008D14.bin':b'M',
                     resources/'dynos/packs/Loose/main.lua':b'S',
+                    resources/'dynos/packs/Loose/nested/not-selected.lua':b'IGNORE',
                     resources/'dynos/packs/Loose/sound/jump.ogg':b'V',
                     folder/'unrelated/toad_geo.bin':b'IGNORE',
                     resources/'outside/luigi_geo.bin':b'IGNORE',
@@ -49,6 +50,8 @@ class DynosFilesystemTest(unittest.TestCase):
                 archives=resources if legacy else folder/'mods';archives.mkdir(exist_ok=True)
                 with zipfile.ZipFile(archives/'Actors.zip','w') as z:
                     z.writestr('Classic/luigi_geo.bin',b'Z')
+                    z.writestr('Classic/main.lua',b'SCRIPT')
+                    z.writestr('Classic/sound/jump.ogg',b'VOICE')
                     z.writestr('dynos/packs/Loose/mario_geo.bin',b'ZIP_SHADOW')
                     z.writestr('../escape/wario_geo.bin',b'IGNORE')
                 with zipfile.ZipFile(archives/'Texture.zip','w') as z:z.writestr('gfx/shared.bin',b'T')

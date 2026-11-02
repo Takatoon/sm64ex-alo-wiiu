@@ -109,6 +109,8 @@ bool fs_mount(const char *realpath);
 // Scoped DynOS access: loose files under the layout's dynos/packs directory,
 // and model files in already-mounted non-base archives. Never walk the SD root.
 fs_pathlist_t fs_enumerate_models(void);
+// Lua data beside a selected model pack, using the same restricted mounts.
+fs_pathlist_t fs_enumerate_model_scripts(const char *pack);
 fs_file_t *fs_open_model(const char *vpath);
 
 fs_pathlist_t fs_texture_packs(void);

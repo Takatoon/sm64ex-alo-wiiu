@@ -1,6 +1,7 @@
 #include "dynos.h"
 #include "dynos_model.h"
 #include "dynos_graph.h"
+#include "dynos_voice.h"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -221,7 +222,7 @@ bool load_entry(Entry &entry,const std::vector<int> *hierarchy=nullptr) {
         }
         if(entry.animation_overrides.empty()){entry.model.reset();error="no compatible native animation slots";}
     }
-    if(entry.model&&resident_bytes+entry.model->memory_bytes>128*1024*1024) {
+    if(entry.model&&resident_bytes+dynos_voice_resident_bytes()+entry.model->memory_bytes>128*1024*1024) {
         entry.model.reset();error="resident model memory budget reached";
     }
     if(entry.model) {
@@ -292,17 +293,19 @@ void dynos_init(void) {
     dynos_mods_enabled=configModsEnabled?1:0;
     active={configModsEnabled,dynos_texture_choice,dynos_npc_choice,dynos_player_choice};
     fs_set_texture_pack(!active.enabled||!active.texture?"":active.texture==1?nullptr:texture_packs[active.texture-2].path.c_str());
-    DYNOS_LOG("DYNOS_INIT version=4 models=%u npc_packs=%u texture_packs=%u scope=mods_menu star_hand_trace=1",unsigned(entries.size()),unsigned(npc_packs.size()),unsigned(texture_packs.size()));
+    DYNOS_LOG("DYNOS_INIT version=5 models=%u npc_packs=%u texture_packs=%u scope=mods_menu static_voices=1 star_hand_trace=1",unsigned(entries.size()),unsigned(npc_packs.size()),unsigned(texture_packs.size()));
 }
 
 namespace {
 void select_player(unsigned choice) {
-    selected_graph=nullptr;applied_choice=choice;
+    selected_graph=nullptr;applied_choice=choice;dynos_voice_clear();
     if(active.enabled&&choice&&choice<=entries.size()){
         Entry &entry=*entries[choice-1];load_entry(entry);selected_graph=entry.graph;
+        if(selected_graph)dynos_voice_select(entry.pack.c_str(),(entry.slot+"_geo").c_str(),128*1024*1024-resident_bytes);
     }
 }
 void release_models(void) {
+    dynos_voice_clear();
     selected_graph=nullptr;npc_bindings.clear();textures.clear();
     alloc_only_pool_clear(graph_pool);
     auto reset=[](Entry &entry){entry.graph=nullptr;entry.animation_overrides.clear();entry.model.reset();entry.failed=false;entry.logged_animation_fallback=false;};
@@ -360,7 +363,7 @@ unsigned int dynos_texture_count(void){return unsigned(texture_packs.size()+2);}
 const unsigned char **dynos_texture_labels(void){return texture_labels;}
 unsigned int dynos_npc_pack_count(void){return unsigned(npc_packs.size()+1);}
 const unsigned char **dynos_npc_pack_labels(void){return npc_labels;}
-uint64_t dynos_resident_bytes(void){return resident_bytes;}
+uint64_t dynos_resident_bytes(void){return resident_bytes+dynos_voice_resident_bytes();}
 
 void dynos_request_player_step(int direction){pending_step=direction;}
 void dynos_clear_npc_bindings(void){npc_bindings.clear();registered_models.clear();}

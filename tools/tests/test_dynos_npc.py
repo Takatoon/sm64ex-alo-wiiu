@@ -21,7 +21,8 @@ class DynosNpcTest(unittest.TestCase):
             exe=folder/'runtime'
             subprocess.run(['g++','-std=c++17',*includes,'-D_LANGUAGE_C_PLUS_PLUS=1','-DF3DEX_GBI_2=1','-DF3DEX_GBI_2E=1',
                             'src/pc/dynos/dynos.cpp','src/pc/dynos/dynos_graph.cpp','src/pc/dynos/dynos_model.cpp',
-                            'tools/tests/dynos_runtime_test.cpp',*objects,'-o',str(exe)],cwd=ROOT,check=True)
+                            'src/pc/dynos/dynos_voice.cpp','src/pc/dynos/dynos_voice_manifest.cpp',
+                            'tools/tests/dynos_runtime_test.cpp',*objects,'-lvorbisfile','-lvorbis','-logg','-o',str(exe)],cwd=ROOT,check=True)
             result=subprocess.run([str(exe),str(folder)],cwd=ROOT,check=True,capture_output=True,text=True)
             self.assertIn('A broken/actors/toad_geo.bin reason=',result.stdout)
             self.assertIn('DYNOS_NPC_BOUND actor=toad_geo path=dynos/packs/B valid/',result.stdout)

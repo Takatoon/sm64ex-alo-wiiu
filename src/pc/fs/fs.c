@@ -443,6 +443,27 @@ fs_pathlist_t fs_enumerate_models(void) {
     return list;
 }
 
+static bool enumerate_model_script(void *user, const char *path) {
+    fs_pathlist_t *list=user;
+    while (*path=='/') ++path;
+    size_t length=strlen(path);
+    if (length<4 || strcmp(path+length-4,".lua") || !model_path_safe(path)) return true;
+    for (int i=0;i<list->numpaths;++i) if (!strcmp(list->paths[i],path)) return true;
+    if (list->numpaths==64) return false;
+    return enumerate_walk(list,path);
+}
+fs_pathlist_t fs_enumerate_model_scripts(const char *pack) {
+    fs_pathlist_t list={malloc(sizeof(char*)*32),0,32};
+    if (!list.paths || !pack || !*pack || !model_path_safe(pack)) return list;
+    for (fs_dir_t *dir=fs_searchpaths;dir;dir=dir->next) {
+        if (!model_mount(dir)) continue;
+        if (dir->packer==&fs_packtype_dir && strcmp(pack,"dynos/packs") && strncmp(pack,"dynos/packs/",12)) continue;
+        fs_walk_result_t result=dir->packer->walk(dir->pack,pack,enumerate_model_script,&list,false);
+        if (result==FS_WALK_INTERRUPTED || result==FS_WALK_ERROR) {fs_pathlist_free(&list);break;}
+    }
+    return list;
+}
+
 fs_pathlist_t fs_texture_packs(void) {
     fs_pathlist_t list={malloc(sizeof(char*)*32),0,32};
     if(!list.paths)return list;
