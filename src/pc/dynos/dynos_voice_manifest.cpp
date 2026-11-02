@@ -169,6 +169,60 @@ bool voice_manifest(const std::string &lua,const std::string &model,VoiceManifes
     if(out.empty()){error="no static voice table for selected model";return false;}
     return true;
 }
+std::vector<PlayerDeclaration> player_declarations(const std::string &lua) {
+    Parser p;std::vector<PlayerDeclaration> result;
+    if(lua.size()>1024*1024||!p.lex(lua))return result;
+    std::map<std::string,Value> variables;
+    for(size_t i=0;i+2<p.tokens.size();++i) {
+        if(p.tokens[i].kind!=Token::Identifier||p.tokens[i+1].text!="="||(i&&p.tokens[i-1].text=="."))continue;
+        p.at=i+2;Value v=p.value();
+        if(p.at<p.tokens.size()&&p.tokens[p.at].kind==Token::Symbol&&p.tokens[p.at].text!=";"&&p.tokens[p.at].text!=","&&p.tokens[p.at].text!="}"&&p.tokens[p.at].text!=")")v={};
+        auto inserted=variables.emplace(p.tokens[i].text,std::move(v));if(!inserted.second)inserted.first->second={};
+        if(!p.valid)return {};
+    }
+    for(size_t i=0;i+1<p.tokens.size();++i) {
+        if(p.tokens[i].kind!=Token::Identifier||p.tokens[i+1].text!="(")continue;
+        bool costume=p.tokens[i].text=="character_add_costume";
+        if(!costume&&p.tokens[i].text!="character_add")continue;
+        p.at=i+2;std::vector<Value> args;
+        while(p.at<p.tokens.size()&&!p.is(")")&&args.size()<16){args.push_back(p.expression());if(!p.take(","))break;}
+        if(!p.take(")"))continue;
+        unsigned offset=costume?1:0;
+        if(args.size()<=offset+4)continue;
+        Value model=resolve(args[offset+4],variables),name=resolve(args[offset],variables);
+        if(model.kind!=Value::Model||model.text.size()<5||model.text.substr(model.text.size()-4)!="_geo"||!voice_relative_path(model.text)||model.text.find('/')!=std::string::npos)continue;
+        bool duplicate=false;for(const auto &entry:result)if(entry.model==model.text)duplicate=true;
+        if(duplicate||result.size()==64)continue;
+        PlayerDeclaration entry;entry.model=model.text;
+        if(name.kind==Value::String)entry.name=name.text;
+        while(!entry.name.empty()&&std::isspace(static_cast<unsigned char>(entry.name.back())))entry.name.pop_back();
+        if(args.size()>offset+5&&args[offset+5].kind==Value::Reference){
+            const std::string &base=args[offset+5].text;
+            if(base=="CT_LUIGI")entry.slot="luigi";else if(base=="CT_WARIO")entry.slot="wario";
+            else if(base=="CT_WALUIGI")entry.slot="waluigi";else if(base=="CT_TOAD")entry.slot="toad_player";
+        }
+        result.push_back(std::move(entry));
+    }
+    for(size_t i=0;i+1<p.tokens.size();++i) {
+        if(p.tokens[i].kind!=Token::Identifier||p.tokens[i].text!="character_add_palette_preset"||p.tokens[i+1].text!="(")continue;
+        p.at=i+2;Value model=p.expression();if(!p.take(","))continue;Value table=p.expression();if(!p.take(")"))continue;
+        model=resolve(model,variables);table=resolve(table,variables);
+        if(model.kind!=Value::Model||table.kind!=Value::Table)continue;
+        for(auto &entry:result)if(entry.model==model.text&&!entry.has_palette){
+            static const char *const parts[]={"PANTS","SHIRT","GLOVES","SHOES","HAIR","SKIN","CAP","EMBLEM"};
+            bool valid=true;
+            for(unsigned part=0;part<8;++part){
+                auto field=table.fields.find(parts[part]);Value color=field==table.fields.end()?Value{}:resolve(field->second,variables);
+                if(color.kind!=Value::String||color.text.size()!=6){valid=false;break;}
+                for(unsigned char c:color.text)if(!std::isxdigit(c))valid=false;
+                if(!valid)break;entry.palette[part]=std::strtoul(color.text.c_str(),nullptr,16);
+            }
+            entry.has_palette=valid; // first complete static preset is the default
+        }
+    }
+    return result;
+}
+
 std::string voice_sound_key(unsigned bits) {
     unsigned bank=(bits&SOUNDARGS_MASK_BANK)>>SOUNDARGS_SHIFT_BANK;
     unsigned id=(bits>>SOUNDARGS_SHIFT_SOUNDID)&255;

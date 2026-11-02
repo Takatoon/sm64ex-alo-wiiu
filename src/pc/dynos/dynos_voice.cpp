@@ -92,19 +92,27 @@ void dynos_voice_clear(void) {
     // Otherwise switching costumes could reveal the old native note's tail.
 }
 uint64_t dynos_voice_resident_bytes(void){return resident;}
+namespace dynos {
+bool read_pack_lua(const char *pack,std::string &lua) {
+    lua.clear();fs_pathlist_t files=fs_enumerate_model_scripts(pack);
+    std::set<std::string> paths;for(int i=0;i<files.numpaths;++i)paths.insert(files.paths[i]);fs_pathlist_free(&files);
+    for(const auto &path:paths) {
+        std::vector<unsigned char> data;
+        if(!read_file(path,1024*1024,data)){
+            VOICE_LOG("DYNOS_LUA_SKIP path=%s reason=unreadable_or_oversized",path.c_str());continue;
+        }
+        std::string text(data.begin(),data.end());
+        if(text.find("CHAR_SOUND_")==std::string::npos&&text.find("character_add")==std::string::npos&&text.find("smlua_model_util_get_id")==std::string::npos)continue;
+        if(text.size()+lua.size()+1>1024*1024){lua.clear();VOICE_LOG("DYNOS_LUA_REJECT pack=%s reason=relevant_data_limit",pack);return false;}
+        lua+=text;lua+='\n';
+    }
+    return !lua.empty();
+}
+}
 void dynos_voice_select(const char *pack,const char *model,uint64_t budget) {
     dynos_voice_clear();budget=std::min<uint64_t>(budget,voice_limit);
     if(!pack||!model||!budget)return;
-    fs_pathlist_t files=fs_enumerate_model_scripts(pack);
-    std::set<std::string> paths;for(int i=0;i<files.numpaths;++i)paths.insert(files.paths[i]);fs_pathlist_free(&files);
-    if(paths.empty())return;
-    std::string lua;
-    for(const auto &path:paths) {
-        std::vector<unsigned char> data;
-        if(!read_file(path,1024*1024-lua.size(),data)){VOICE_LOG("DYNOS_VOICE_REJECT path=%s reason=Lua_read_or_size_limit",path.c_str());return;}
-        lua.append(data.begin(),data.end());lua+='\n';
-        if(lua.size()>1024*1024){VOICE_LOG("DYNOS_VOICE_REJECT path=%s reason=Lua_size_limit",path.c_str());return;}
-    }
+    std::string lua;if(!dynos::read_pack_lua(pack,lua))return;
     dynos::VoiceManifest manifest;std::string error;
     if(!dynos::voice_manifest(lua,model,manifest,error)){VOICE_LOG("DYNOS_VOICE_REJECT pack=%s reason=%s",pack,error.c_str());return;}
     std::map<std::string,std::shared_ptr<Clip>> cache;

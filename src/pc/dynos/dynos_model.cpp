@@ -270,13 +270,14 @@ void fix_display_lists(Model &m) {
             } else if(op==0xd2) {
                 require(w.kind==0,"invalid light copy");
                 int src=int((w0>>16)&255)*8/24-1,dst=int((w0>>8)&255)*8/24-1;
-                int part=src/2-1;require(part>=0&&part<8&&(dst==1||dst==2),"unsupported palette copy");
+                int part=src/2-1;require(part>=0&&(dst==1||dst==2),"unsupported palette copy");
                 // A player-part copy consists of directional (destination 1)
                 // then ambient (destination 2). Decode the part from the first
                 // command: the second source can round into the NEXT part.
-                if(dst==1)paired_part=part;
+                if(dst==1){require(part<8,"unsupported palette copy");paired_part=part;}
                 else if(paired_part>=0){part=paired_part;paired_part=-1;}
                 else if(src==15)part=8;
+                else require(part<8,"unsupported palette copy");
                 Gfx number=gsSPNumLights(NUMLIGHTS_1);
                 r.display_list[output++]=number;
                 if(dst==1) { Gfx g=gsSPLight(&m.palette[part].l[0],1);w0=g.words.w0;w1=g.words.w1; }

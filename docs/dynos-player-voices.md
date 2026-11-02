@@ -54,12 +54,22 @@ filename. Both `filename.ogg` and `sound/filename.ogg` refer to the pack's
 filename convention is needed. Parent traversal and absolute paths are rejected.
 
 Direct `.lua` files in the selected pack folder are read in alphabetical order,
-with a maximum of 64 files and 1 MiB of Lua text. Subfolders are not searched
-for scripts. Concatenation, computed values, helper functions that construct
+with a maximum of 64 files and 1 MiB of relevant Lua text. Individual files
+larger than 1 MiB are skipped with `DYNOS_LUA_SKIP`, so a large custom-animation
+script does not block a smaller voice table. Files without model/character/voice
+markers do not count toward the combined relevant-text limit. Subfolders are
+not searched for scripts. Concatenation, computed values, helper functions that construct
 voice tables, dynamically loaded scripts and Lua hooks are not evaluated.
 Existing Character Select packs therefore work only when their relevant voice
 mapping fits these static forms. AIFF, WAV, MP3 and Lua-defined playback behavior
 are not supported by this reader.
+
+Static `character_add`/`character_add_costume` records can discover custom BIN
+names and retain the model's original ID for voice association. The model must
+still pass the player's skeleton and callback checks. A Character Select
+base-character override such as `CT_LUIGI` does not supply voice samples:
+CoopDX's built-in character sound banks are not present in a model BIN and
+are not automatically downloaded by this port.
 
 ## Playback and fallback
 

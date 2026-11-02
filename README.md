@@ -183,6 +183,8 @@ extra joints at the end of their skeleton. Arbitrary skeletons, Lua execution,
 Character Select behavior and custom actions are not supported. Static
 `CHAR_SOUND_*` voice tables can be read from a pack's Lua files without running
 Lua; the selected player's Ogg Vorbis voices load from its `sound/` folder.
+Static `character_add`/`character_add_costume` declarations also expose custom
+BIN names, labels and the first complete eight-part palette preset.
 Missing or invalid clips retain the native voice. See the
 [player voice guide](docs/dynos-player-voices.md) for the layout and supported
 Lua data forms. Voices are separate files, not part of the model BIN.

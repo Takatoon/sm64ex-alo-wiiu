@@ -45,6 +45,12 @@ int main(int argc,char **argv) {
         if(dl[1].words.w1!=reinterpret_cast<uintptr_t>(&model->palette[0].l[0])||
            dl[3].words.w1!=reinterpret_cast<uintptr_t>(&model->palette[0].a))return 8;
     }
+    auto emblem=model->records.find("test_emblem_palette");
+    if(emblem!=model->records.end()){
+        const auto &dl=emblem->second->display_list;
+        if(dl.size()!=5||dl[1].words.w1!=reinterpret_cast<uintptr_t>(&model->palette[7].l[0])||
+           dl[3].words.w1!=reinterpret_cast<uintptr_t>(&model->palette[7].a))return 15;
+    }
     auto real_palette=model->records.find("test_real_palette");
     if(real_palette!=model->records.end()) {
         const auto &dl=real_palette->second->display_list;

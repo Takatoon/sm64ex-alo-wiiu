@@ -163,6 +163,13 @@ class NativeReaderTest(unittest.TestCase):
         self.check(b'DYNOSBIN'+struct.pack('<Q',len(record+geometry()))+zlib.compress(record+geometry()),True)
         self.check(record[:-1],False,'truncated')
 
+    def test_emblem_ambient_uses_directional_part_before_range_validation(self):
+        def display(words):
+            return b'\x04'+name('test_emblem_palette')+struct.pack('<I',len(words)//2)+struct.pack('<'+'I'*len(words),*words)
+        self.check(display([0xd236060a,1,0xd239090a,1,0xdf000000,0])+geometry(),True)
+        self.check(display([0xd239060a,1,0xdf000000,0])+geometry(),False,'unsupported palette copy')
+        self.check(display([0xd239090a,1,0xdf000000,0])+geometry(),False,'unsupported palette copy')
+
     def test_float_vertices_reject_invalid_coordinates(self):
         marker=struct.pack('<8H',0x3346,0x5632,0x5854,0,0,0,0,0)
         for value in (float('nan'),float('inf'),float('-inf'),32768.,-32769.):

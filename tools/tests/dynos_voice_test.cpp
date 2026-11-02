@@ -50,6 +50,8 @@ int main(int argc,char **argv) {
     fs::path root=argv[1],pack=root/"dynos/packs/Voice";fs::create_directories(pack/"sound");
     encode(pack/"sound/jump.ogg",44100,2,44100/5);
     write_text(pack/"sound/bad.ogg","not an Ogg stream");
+    std::ofstream(pack/"custom-anims.lua")<<std::string(1600000,'x'); // unrelated oversized script must not veto main.lua
+    write_text(pack/"unrelated.lua","local unrelated = 'metadata only'");
     write_text(pack/"main.lua",R"(local MODEL = smlua_model_util_get_id('mario_geo')
 local V = {
  [CHAR_SOUND_YAH_WAH_HOO] = {'jump.ogg','missing.ogg','bad.ogg'},

@@ -41,6 +41,12 @@ Do not zip a ZIP. File names supported by this first selector are
 `mario_geo.bin`, `luigi_geo.bin`, `wario_geo.bin`, `waluigi_geo.bin`,
 `toad_player_geo.bin` and `sunshine_geo.bin`. A different Mario-compatible
 replacement can be renamed `mario_geo.bin` without altering its contents.
+Static Character Select `character_add` and `character_add_costume` declarations
+also discover other `*_geo.bin` player names without renaming the original BINs.
+Only explicitly registered player models are added this way; cap/shell models
+are not inferred as players from a `get_id` reference alone. Labels come from
+the static character name. The BIN must still pass native player hierarchy,
+callback and material validation; discovery does not imply full compatibility.
 
 Restart the application after installing/changing packs. In the pause Options
 menu, open **MODS**, choose **PLAYER MODEL**, then **APPLY CHANGES**.
@@ -75,10 +81,12 @@ renderer; experimental DDS/GPU profiling changes are not included here.
   secondary texture coordinates are rejected when sampled. Secondary loads
   unused by an explicitly defined material combiner are omitted to preserve
   the renderer's shared UV bounds.
-- CoopDX light-copy commands use fixed standard palettes selected by the slot
-  name. Original material lights are otherwise retained. Lua-defined palettes
-  and character identities are not interpreted (a Yoshi in a Waluigi slot still
-  inherits that slot's default palette/name).
+- CoopDX light-copy commands use standard palettes selected by the slot name.
+  For statically registered Character Select players, the first complete
+  `character_add_palette_preset` with literal six-digit RGB values for PANTS,
+  SHIRT, GLOVES, SHOES, HAIR, SKIN, CAP and EMBLEM overrides these defaults.
+  Original material lights are otherwise retained. Palette scripting and
+  runtime preset selection are not implemented.
 
 Player animation tables remain unused. Supported custom NPC hierarchies can
 use embedded animation tables as described below. There is no Lua execution,
@@ -313,7 +321,7 @@ after level unload, model-ID reuse and shortcut selection/persistence. Native
 graph tests cover switches, LODs, empty shadow states and cycles. Platform
 services and graph allocation are stubbed in the runtime test; Wii U visuals,
 NPC cutscenes and controller hardware still require console verification.
-Logs: `DYNOS_INIT version=5`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
+Logs: `DYNOS_INIT version=6`, `DYNOS_NPC_BOUND`, `DYNOS_REJECT`, and
 `DYNOS_PLAYER_SHORTCUT`. The TCP log receiver is not stopped by this feature.
 
 With DynOS enabled, Wii Remote Minus is reserved for the model modifier rather than the legacy N64 L binding.
@@ -430,3 +438,27 @@ spy: exactly one canonical dynos/packs tree is traversed. They check root-level
 decoys cannot override legacy models, duplicate ZIP paths appear once, model
 ZIPs still work, unsafe paths are rejected, related pack files can be opened
 from the canonical root, and root-level configuration remains accessible.
+
+## SwagSkeleton95 Character Select pack
+
+The supplied `[CS] SwagSkeleton95's CS pack(1).zip` was checked unchanged with
+the reader and runtime harness. Its 13 body models are statically discovered
+from `main.lua`, including costumes, with their labels and first palette presets.
+
+| Models | Current reader result |
+| --- | --- |
+| Mario, Luigi, Toad, Toadette, Wario, Waluigi | Accepted with native Mario animation hierarchy |
+| Peach, Peach alternate, Daisy, Daisy alternate | Rejected: different player animation hierarchy |
+| Bowser, Dry Bowser, Yoshi | Rejected: incompatible geometry callback context |
+
+The oversized `custom-anims.lua` is skipped rather than preventing the smaller
+model/voice metadata from loading. It is not executed and its player animation
+overrides remain unsupported. A paired EMBLEM ambient light copy is validated
+after resolving its preceding directional part, avoiding a false palette-index
+rejection without accepting arbitrary player light-copy indices.
+
+The archive's external voice tables target Peach/Daisy variants, Bowser/Dry
+Bowser and Yoshi. The other six models do not include external voice tables;
+their Character Select base-character overrides depend on CoopDX's built-in
+voices, which are not imported by this port. Reader/harness acceptance is not
+Wii U visual or listening verification. No third-party assets are committed.
