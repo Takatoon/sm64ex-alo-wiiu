@@ -104,6 +104,16 @@ bool fs_init(const char **rodirs, const char *gamedir, const char *userdir);
 // packs mounted later take priority over packs mounted earlier
 bool fs_mount(const char *realpath);
 
+// Texture-only overlay policy. NULL: all alphabetically (last wins), "": base only.
+// Model BINs and open file handles remain available regardless of this policy.
+// Scoped DynOS access: loose files under the layout's dynos/packs directory,
+// and model files in already-mounted non-base archives. Never walk the SD root.
+fs_pathlist_t fs_enumerate_models(void);
+fs_file_t *fs_open_model(const char *vpath);
+
+fs_pathlist_t fs_texture_packs(void);
+bool fs_set_texture_pack(const char *realpath);
+
 // removes the pack at physical path from the virtual filesystem
 bool fs_unmount(const char *realpath);
 

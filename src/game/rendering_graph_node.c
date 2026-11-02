@@ -10,6 +10,12 @@
 #include "print.h"
 #include "rendering_graph_node.h"
 #include "shadow.h"
+#ifdef DYNOS
+#include "pc/dynos/dynos.h"
+#include "pc/dynos/dynos_animation.h"
+#include "mario_misc.h"
+#include "object_list_processor.h"
+#endif
 
 #include "config.h"
 #include "config/config_world.h"
@@ -1108,6 +1114,22 @@ void process_object_scale_interpolated(struct Object *node, Vec3f scaleInterpola
 /**
  * Process an object node.
  */
+#ifdef DYNOS
+static struct GraphNode *dynos_render_npc(struct GraphNode *original, struct AnimInfo *info) {
+    const struct Animation *animation = NULL;
+    struct GraphNode *graph = dynos_npc_graph_with_animation(original, info->curAnim, &animation);
+    if (animation != NULL) {
+        gCurrAnimFrame = dynos_animation_frame(info->curAnim, animation, gCurrAnimFrame);
+#ifdef HIGH_FPS_PC
+        gPrevAnimFrame = dynos_animation_frame(info->curAnim, animation, gPrevAnimFrame);
+#endif
+        gCurrAnimAttribute = (u16 *) animation->index;
+        gCurrAnimData = (s16 *) animation->values;
+    }
+    return graph;
+}
+#endif
+
 void geo_process_object(struct Object *node) {
 #ifdef HIGH_FPS_PC
     Vec3f scaleInterpolated;
@@ -1213,11 +1235,17 @@ void geo_process_object(struct Object *node) {
         if (obj_is_in_view(&node->header.gfx, gMatStack[gMatStackIndex + 1])) {
             inc_mat_stack();
 
-            if (node->header.gfx.sharedChild != NULL) {
+            struct GraphNode *sharedChild = node->header.gfx.sharedChild;
+#ifdef DYNOS
+            if (node == gMarioObject || (void *) node == (void *) &gMirrorMario)
+                sharedChild = dynos_player_graph(sharedChild);
+            else sharedChild = dynos_render_npc(sharedChild, &node->header.gfx.animInfo);
+#endif
+            if (sharedChild != NULL) {
                 gCurGraphNodeObject = (struct GraphNodeObject *) node;
-                node->header.gfx.sharedChild->parent = &node->header.gfx.node;
-                geo_process_node_and_siblings(node->header.gfx.sharedChild);
-                node->header.gfx.sharedChild->parent = NULL;
+                sharedChild->parent = &node->header.gfx.node;
+                geo_process_node_and_siblings(sharedChild);
+                sharedChild->parent = NULL;
                 gCurGraphNodeObject = NULL;
             }
             if (node->header.gfx.node.children != NULL) {
@@ -1311,7 +1339,11 @@ void geo_process_held_object(struct GraphNodeHeldObject *node) {
             geo_set_animation_globals(&node->objNode->header.gfx.animInfo, (node->objNode->header.gfx.node.flags & GRAPH_RENDER_HAS_ANIMATION) != 0);
         }
 
-        geo_process_node_and_siblings(node->objNode->header.gfx.sharedChild);
+        struct GraphNode *heldChild=node->objNode->header.gfx.sharedChild;
+#ifdef DYNOS
+        heldChild=dynos_render_npc(heldChild, &node->objNode->header.gfx.animInfo);
+#endif
+        geo_process_node_and_siblings(heldChild);
         gCurGraphNodeHeldObject = NULL;
         gCurrAnimType = tempType;
         gCurrAnimEnabled = tempEnabled;

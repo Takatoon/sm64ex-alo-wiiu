@@ -42,6 +42,7 @@ make -j"${jobs}" \
     TARGET_WII_U=1 \
     VERSION="${version}" \
     EXTERNAL_DATA="${EXTERNAL_DATA:-1}" \
+    DYNOS="${DYNOS:-0}" \
     HIGH_FPS_PC="${HIGH_FPS_PC:-1}" \
     WIIU_LOAD_TIMING_PROFILE="${WIIU_LOAD_TIMING_PROFILE:-0}" \
     "${legacy_path_args[@]}"

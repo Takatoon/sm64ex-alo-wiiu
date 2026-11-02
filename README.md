@@ -36,6 +36,10 @@ It adds a Docker-based build workflow, improves external texture-pack loading, a
 
 * Added optional Wii U load-time profiling and a log analyzer for diagnosing texture loads, level transitions, and frame-time stalls. Profiling is disabled in normal builds.
 
+* Added optional, partial DynOS support for player models and NPC/actor packs, including selected NPCs with custom skeletons and embedded animations.
+
+* Added an **Options > MODS** menu to enable/disable mods, select textures, a player model and one NPC pack, and apply changes without restarting the level. Hold **Minus (-) + D-pad Left/Right** to cycle player models.
+
 
 ### Requirements
 
@@ -136,6 +140,51 @@ Texture loading behavior can be configured with `precache` in `sm64config.txt`:
 Both modes are supported, so the choice depends on whether you prefer a longer initial load or shorter startup with small per-level loading times. `sm64config.txt` is created automatically on first launch.
 
 See the [build guide](docs/wiiu-docker.md) for the complete workflow, the [storage layout documentation](docs/wiiu-storage-layout.md) for runtime paths and legacy compatibility, and the [profiling guide](docs/wiiu-load-profiling.md) for optional measurements.
+
+### Optional DynOS model packs
+
+Enable this feature when building by passing `--dynos enabled` to the Wii U
+build script, with external textures enabled (`DYNOS=1 EXTERNAL_DATA=1` for
+manual builds). DynOS is disabled by default. Compatible model packs can then
+be installed without rebuilding the game. Model BINs with embedded PNGs include
+their own textures; no separate texture pack is needed for those models.
+
+Recommended locations for loose model packs:
+
+| Storage layout | Player example | NPC pack example |
+| --- | --- | --- |
+| Application folder (Aroma Beta 11+) | `SD:/wiiu/apps/<name>/dynos/packs/players/Mario DS/mario_geo.bin` | `SD:/wiiu/apps/<name>/dynos/packs/npcs/SwagSkeleton95/actors/goomba_geo.bin` |
+| Legacy | `SD:/sm64ex_res/dynos/packs/players/Mario DS/mario_geo.bin` | `SD:/sm64ex_res/dynos/packs/npcs/SwagSkeleton95/actors/goomba_geo.bin` |
+
+The `players/`, `npcs/` and `actors/` folders help organize packs but are
+optional. The legacy layout exclusively uses `SD:/sm64ex_res/dynos/` for loose
+models; there is no fallback to `SD:/dynos/`. Model ZIPs can also be installed
+in the application's `mods/` folder, or directly in `SD:/sm64ex_res/` for legacy
+builds. Restart the game after installing or changing pack files.
+
+In **Options > MODS**, select:
+
+* **Enable Mods:** enable or disable texture and model replacements while retaining your choices.
+* **Texture Pack:** base textures, one pack, or all packs in alphabetical order. Later packs take priority, with `base.zip` as the fallback for missing textures.
+* **Player Model:** vanilla Mario or an available compatible model.
+* **NPC Pack:** vanilla actors or one pack. Missing or rejected replacements use the original actor.
+
+Select **Apply Changes** to activate the choices together. Applying changes may
+pause while resources reload, but preserves the current level and progress.
+On Wii U, hold **Minus (-)** and press **D-pad Left/Right** to change the player
+model directly, including a return to vanilla Mario.
+
+Support is partial: player models use Mario's original skeleton and animations.
+Selected NPCs (Bob-ombs, Chuckya and Skeeter) can use different joint counts
+with compatible embedded animations; other compatible NPCs can have static
+extra joints at the end of their skeleton. Arbitrary skeletons, Lua scripts,
+Character Select behavior, custom actions and custom voices are not supported.
+Some two-cycle materials, including those in Galaxy Mario Recolor, may display
+incorrect colors. High-polygon models can reduce performance on Wii U.
+
+See the [DynOS pack guide](docs/dynos-player-packs.md) for supported filenames,
+ZIP layouts, compatibility details and known pack limitations. Model packs are
+not included in this repository.
 
 ### Credits
 

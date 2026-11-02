@@ -11,6 +11,7 @@ build_name=""
 build_title=""
 external_textures=""
 legacy_paths=""
+dynos="0"
 base_zip_input=""
 assume_yes=0
 temporary_build_log=""
@@ -42,6 +43,7 @@ Without options, the interactive wizard is shown. Automation options:
   --fps FPS                30 or 60
   --external-textures BOOL enabled or disabled (game-only mode)
   --legacy-paths BOOL      use SD-root settings, saves, and texture paths
+  --dynos BOOL             load compatible DynOS player binaries from SD/ZIP packs
   --jobs NUMBER            parallel build jobs (1-64; detected automatically)
   --name NAME              application directory and WUHB file name
   --title TITLE            title displayed by Aroma
@@ -77,6 +79,13 @@ while (($#)); do
         --base-zip) base_zip_input="${2:?Missing value for --base-zip}"; shift 2 ;;
         --version) version="${2:?Missing value for --version}"; shift 2 ;;
         --fps) fps="${2:?Missing value for --fps}"; shift 2 ;;
+        --dynos)
+            dynos="$(normalize_toggle "${2:?Missing value for --dynos}")" || {
+                echo 'DynOS must be enabled or disabled.' >&2
+                exit 2
+            }
+            shift 2
+            ;;
         --external-textures)
             external_textures="$(normalize_toggle "${2:?Missing value for --external-textures}")" || {
                 echo 'External textures must be enabled or disabled.' >&2
@@ -338,6 +347,10 @@ if [[ "$mode" == game || "$mode" == both ]]; then
             'Disabled - uses built-in textures and loads faster' '0')"
     fi
 
+    if [[ "$dynos" == 1 && "$external_textures" != 1 ]]; then
+        echo 'DynOS requires external texture support (--external-textures enabled).' >&2
+        exit 2
+    fi
     if [[ -z "$legacy_paths" ]]; then
         legacy_paths="$(choose 'Storage layout:' 1 \
             'Application folder (recommended) - keeps settings, saves, and packs beside the WUHB' '0' \
@@ -444,7 +457,7 @@ if [[ "$mode" == game || "$mode" == both ]]; then
     echo
     run_quiet 'Building game and WUHB' "$temporary_build_log" \
         env VERSION="$version" JOBS="$jobs" EXTERNAL_DATA="$external_textures" \
-        HIGH_FPS_PC="$high_fps" WIIU_LEGACY_PATHS="$legacy_paths" \
+        HIGH_FPS_PC="$high_fps" WIIU_LEGACY_PATHS="$legacy_paths" DYNOS="$dynos" \
         BUILD_NAME="$build_name" WUHB_BASENAME="$build_name" BUILD_TITLE="$build_title" \
         WUHB_ASSET_DIR='user-assets/wuhb' DIST_ROOT="$dist_root" \
         bash docker/wiiu/build.sh

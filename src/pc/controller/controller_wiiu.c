@@ -14,6 +14,17 @@
 
 #include "controller_api.h"
 #include "../configfile.h"
+#ifdef DYNOS
+#include "../dynos/dynos.h"
+#include "../dynos/dynos_shortcut.h"
+static unsigned dynos_keys[2],dynos_previous[2];
+#define DYNOS_INPUT(device, buttons, prefix) do { \
+    dynos_keys[device]=((buttons & prefix##MINUS)?DYNOS_KEY_MINUS:0) \
+        |((buttons & prefix##LEFT)?DYNOS_KEY_LEFT:0) \
+        |((buttons & prefix##RIGHT)?DYNOS_KEY_RIGHT:0); \
+    if(buttons & prefix##MINUS)buttons &= ~(prefix##LEFT|prefix##RIGHT); \
+} while(0)
+#endif
 
 extern void KPADShutdown();
 
@@ -69,6 +80,9 @@ static void read_vpad(OSContPad *pad) {
     }
 
     v = status.hold;
+#ifdef DYNOS
+    DYNOS_INPUT(0,v,VPAD_BUTTON_);
+#endif
 
     for (size_t i = 0; i < num_buttons; i++) {
         if (v & map[i].vpadButton) {
@@ -136,6 +150,9 @@ static void read_wpad(OSContPad* pad) {
     bool gamepadRightStickNotSet = pad->ext_stick_x == 0 && pad->ext_stick_y == 0;
 
     if (status.extensionType == WPAD_EXT_NUNCHUK || status.extensionType == WPAD_EXT_MPLUS_NUNCHUK) {
+#ifdef DYNOS
+        DYNOS_INPUT(1,wm,WPAD_BUTTON_);
+#endif
         uint32_t ext = status.nunchuk.hold;
         stick = status.nunchuk.stick;
         rStick = (KPADVec2D) {0.0, 0.0};
@@ -147,11 +164,16 @@ static void read_wpad(OSContPad* pad) {
         if (wm & WPAD_BUTTON_DOWN) { pad->button |= D_CBUTTONS; rStick.y -= 1.0; }
         if (wm & WPAD_BUTTON_LEFT) { pad->button |= L_CBUTTONS; rStick.x -= 1.0; }
         if (wm & WPAD_BUTTON_RIGHT) { pad->button |= R_CBUTTONS; rStick.x += 1.0; }
+#ifndef DYNOS
         if (wm & WPAD_BUTTON_MINUS) pad->button |= L_TRIG;
+#endif
         if (ext & WPAD_NUNCHUK_BUTTON_C) pad->button |= R_TRIG;
         if (ext & WPAD_NUNCHUK_BUTTON_Z) pad->button |= Z_TRIG;
     } else if (status.extensionType == WPAD_EXT_CLASSIC || status.extensionType == WPAD_EXT_MPLUS_CLASSIC) {
         uint32_t ext = status.classic.hold;
+#ifdef DYNOS
+        DYNOS_INPUT(1,ext,WPAD_CLASSIC_BUTTON_);
+#endif
         stick = status.classic.leftStick;
         rStick = status.classic.rightStick;
         for (size_t i = 0; i < num_buttons; i++) {
@@ -165,6 +187,9 @@ static void read_wpad(OSContPad* pad) {
         if (ext & WPAD_CLASSIC_BUTTON_UP) pad->button |= U_JPAD;
     } else if (status.extensionType == WPAD_EXT_PRO_CONTROLLER) {
         uint32_t ext = status.pro.hold;
+#ifdef DYNOS
+        DYNOS_INPUT(1,ext,WPAD_PRO_BUTTON_);
+#endif
         stick = status.pro.leftStick;
         rStick = status.pro.rightStick;
         for (size_t i = 0; i < num_buttons; i++) {
@@ -199,6 +224,9 @@ static void read_wpad(OSContPad* pad) {
 }
 
 static void controller_wiiu_read(OSContPad* pad) {
+#ifdef DYNOS
+    dynos_keys[0]=dynos_keys[1]=0;
+#endif
     pad->stick_x = 0;
     pad->stick_y = 0;
 
@@ -207,6 +235,13 @@ static void controller_wiiu_read(OSContPad* pad) {
 
     read_vpad(pad);
     read_wpad(pad);
+#ifdef DYNOS
+    for(unsigned device=0;device<2;device++) {
+        int step=dynos_shortcut_step(dynos_previous[device],dynos_keys[device]);
+        if(step)dynos_request_player_step(step);
+        dynos_previous[device]=dynos_keys[device];
+    }
+#endif
 }
 
 static u32 controller_wiiu_rawkey(void) {

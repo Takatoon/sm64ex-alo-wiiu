@@ -1,4 +1,7 @@
 #include <ultra64.h>
+#ifdef DYNOS
+#include "pc/dynos/dynos.h"
+#endif
 #ifdef NO_SEGMENTED_MEMORY
 #include <string.h>
 #endif
@@ -345,6 +348,9 @@ static void level_cmd_init_level(void) {
 }
 
 static void level_cmd_clear_level(void) {
+#ifdef DYNOS
+    dynos_clear_npc_bindings();
+#endif
     clear_objects();
     clear_area_graph_nodes();
     clear_areas();
@@ -424,6 +430,9 @@ static void level_cmd_load_model_from_dl(void) {
     if (model < MODEL_ID_COUNT) {
         gLoadedGraphNodes[model] =
             (struct GraphNode *) init_graph_node_display_list(sLevelPool, 0, layer, dl_ptr);
+#ifdef DYNOS
+        dynos_bind_model(model,NULL,gLoadedGraphNodes[model]);
+#endif
     }
 
     sCurrentCmd = CMD_NEXT;
@@ -435,6 +444,9 @@ static void level_cmd_load_model_from_geo(void) {
 
     if (model < MODEL_ID_COUNT) {
         gLoadedGraphNodes[model] = process_geo_layout(sLevelPool, geo);
+#ifdef DYNOS
+        dynos_bind_model(model,segmented_to_virtual(geo),gLoadedGraphNodes[model]);
+#endif
     }
 
     sCurrentCmd = CMD_NEXT;
@@ -451,6 +463,9 @@ static void level_cmd_23(void) {
         // is being stored to the array, so cast the pointer.
         gLoadedGraphNodes[model] =
             (struct GraphNode *) init_graph_node_scale(sLevelPool, 0, layer, dl, scale);
+#ifdef DYNOS
+        dynos_bind_model(model,NULL,gLoadedGraphNodes[model]);
+#endif
     }
 
     sCurrentCmd = CMD_NEXT;

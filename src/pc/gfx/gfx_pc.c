@@ -5,6 +5,14 @@
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
+#ifdef DYNOS
+#include "pc/dynos/dynos.h"
+#include "game/level_update.h"
+#include "game/area.h"
+#ifdef TARGET_WII_U
+#include "gfx_gx2.h"
+#endif
+#endif
 
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
 #include <PR/os_time.h>
@@ -783,7 +791,11 @@ static inline void load_texture(const char *fullpath) {
     const bool profile_runtime = gfx_preload_depth == 0;
     const uint64_t profile_begin_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
 #endif
-    u8 *imgdata = fs_load_file(fullpath, &imgsize);
+    u8 *imgdata = NULL;
+#ifdef DYNOS
+    imgdata = dynos_texture_read(fullpath, &imgsize);
+#endif
+    if (!imgdata) imgdata = fs_load_file(fullpath, &imgsize);
 #if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     const uint64_t profile_read_us = (profile_runtime || profile_post_save) ? osGetTime() : 0;
 #endif
@@ -2740,6 +2752,43 @@ void gfx_end_frame(void) {
 #endif
     }
 }
+
+#ifdef DYNOS
+bool gfx_begin_mod_reload(void) {
+#ifdef TARGET_WII_U
+    if (!gfx_gx2_gpu_available()) return false;
+#endif
+    gfx_flush();
+    gfx_rapi->finish_render();
+#ifdef TARGET_WII_U
+    gfx_wiiu_reset_texture_cache(false);
+#ifdef EXT_OPTIONS_MENU
+    gfx_gx2_prepare_options_frame(false); // Recapture the world behind the pause menu.
+#endif
+#else
+    for (uint32_t i=0;i<gfx_texture_cache.pool_pos;++i) {
+#ifdef EXTERNAL_DATA
+        if (gfx_texture_cache.pool[i].owns_texture_addr)
+            free((void *)gfx_texture_cache.pool[i].texture_addr);
+#endif
+    }
+    memset(gfx_texture_cache.hashmap,0,sizeof(gfx_texture_cache.hashmap));
+    gfx_texture_cache.pool_pos=0;
+    rendering_state.textures[0]=rendering_state.textures[1]=NULL;
+    rdp.textures_changed[0]=rdp.textures_changed[1]=true;
+    ++gfx_texture_cache_generation;
+#endif
+    return true;
+}
+void gfx_end_mod_reload(void) {
+#ifdef EXTERNAL_DATA
+    if (configPrecacheRes) gfx_precache_textures();
+#ifdef TARGET_WII_U
+    else gfx_precache_level_textures(gCurrLevelNum);
+#endif
+#endif
+}
+#endif
 
 void gfx_shutdown(void) {
     if (gfx_rapi) {

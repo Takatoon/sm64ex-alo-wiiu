@@ -17,7 +17,9 @@ static inline uint32_t dirtree_hash(const char *s, size_t len) {
 bool fs_dirtree_init(fs_dirtree_t *tree, const size_t entry_len) {
     memset(tree, 0, sizeof(*tree));
 
-    tree->root = malloc(entry_len);
+    // The root participates in the child/sibling lists just like other nodes.
+    // Reused heap bytes must not become pointers during archive enumeration.
+    tree->root = calloc(1, entry_len);
     if (!tree->root) return false;
 
     tree->root->name = ""; // root
