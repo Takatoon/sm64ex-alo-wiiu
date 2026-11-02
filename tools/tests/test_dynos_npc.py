@@ -12,7 +12,10 @@ class DynosNpcTest(unittest.TestCase):
                 file=folder/'dynos/packs'/pack/'actors/toad_geo.bin';file.parent.mkdir(parents=True);file.write_bytes(data)
             npc=folder/'dynos/packs/B valid/actors/black_bobomb_geo.bin'
             npc.write_bytes(animation_record(4)+animation_table('custom_animation')+geometry(parents=[-1,0,1,2]))
-            player=folder/'dynos/packs/Player/mario_geo.bin';player.parent.mkdir(parents=True);player.write_bytes(geometry())
+            player=folder/'dynos/packs/Player/shero_geo.bin';player.parent.mkdir(parents=True);player.write_bytes(geometry())
+            (player.parent/'scap_geo.bin').write_bytes(geometry())
+            (player.parent/'main.lua').write_text("local M=smlua_model_util_get_id('shero_geo')\n_G.charSelect.character_add('Hero','desc','author','ffffff',M,CT_MARIO)")
+            (player.parent/'custom-anims.lua').write_text('x'*1600000)
             includes=['-I.','-Iinclude','-Isrc','-DDYNOS=1','-DEXTERNAL_DATA=1','-DUSE_SYSTEM_MALLOC=1']
             objects=[]
             for source in ['src/pc/fs/fs.c','src/pc/fs/fs_packtype_dir.c','src/pc/fs/fs_packtype_zip.c','src/pc/fs/dirtree.c','src/pc/platform.c']:

@@ -2,6 +2,7 @@
 #include "dynos_model.h"
 #include "dynos_graph.h"
 #include "dynos_voice.h"
+#include "dynos_voice_manifest.h"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -39,7 +40,9 @@ unsigned int dynos_player_choice;
 unsigned int dynos_mods_enabled=1,dynos_texture_choice=1,dynos_npc_choice;
 namespace {
 struct Entry {
-    std::string path, slot, pack;
+    std::string path, slot, pack, model_name, display_name;
+    bool has_palette=false;
+    std::array<uint32_t,8> palette{};
     uint32_t id;
     std::array<unsigned char, 40> label{};
     std::unique_ptr<dynos::Model> model;
@@ -185,6 +188,7 @@ void encode_label(Entry &entry,const std::string &prefix="") {
     for(char &c:lower)if(c>='A'&&c<='Z')c+=32;
     std::string text=prefix+pack;
     if(lower.find(entry.slot)==std::string::npos)text+=" "+entry.slot;
+    if(!entry.display_name.empty())text=prefix+entry.display_name+" "+pack;
     size_t i=0;for(unsigned char c:text){if(i>=entry.label.size()-1)break;
         if(c>='a'&&c<='z')c-=32;
         entry.label[i++]=(c>='A'&&c<='Z')?c-'A'+10:(c>='0'&&c<='9')?c-'0':0x9e;
@@ -212,6 +216,15 @@ bool load_entry(Entry &entry,const std::vector<int> *hierarchy=nullptr) {
         } else error="binary size exceeds limit";
         fs_close(file);
     } else error="file cannot be opened";
+    if(entry.model&&entry.has_palette){
+        for(unsigned part=0;part<8;++part){
+            auto *light=reinterpret_cast<uint8_t*>(&entry.model->palette[part]);
+            for(unsigned component=0;component<3;++component){
+                uint8_t color=uint8_t(entry.palette[part]>>(16-8*component));
+                light[component]=light[component+4]=color/2;light[component+8]=light[component+12]=color;
+            }
+        }
+    }
     if(entry.model&&entry.model->custom_animation_hierarchy) {
         for(unsigned i=0;bank.table&&i<bank.count&&i<entry.model->animation_table.size();++i){
             auto alternate=entry.model->animation_table[i];const Animation *native=bank.table[i];
@@ -256,13 +269,25 @@ void dynos_init(void) {
         if(file.size()>4&&file.substr(file.size()-4)==".bin")candidates.insert(path);
     }
     fs_pathlist_free(&files);std::set<uint32_t> ids;
+    std::map<std::string,std::vector<dynos::PlayerDeclaration>> declarations;
+
     for(auto &path:candidates) {
         uint32_t id=stable_id(path);if(!ids.insert(id).second)continue;
         std::unique_ptr<Entry> entry(new Entry);entry->path=path;entry->id=id;entry->pack=pack_path(path);
         auto slash=path.find_last_of('/');std::string file=path.substr(slash==std::string::npos?0:slash+1);
+        entry->model_name=file.substr(0,file.size()-4);
+        auto declared=declarations.find(entry->pack);
+        if(declared==declarations.end()){
+            std::string lua;std::vector<dynos::PlayerDeclaration> list;
+            if(dynos::read_pack_lua(entry->pack.c_str(),lua))list=dynos::player_declarations(lua);
+            declared=declarations.emplace(entry->pack,std::move(list)).first;
+        }
         bool player=false;
+        for(const auto &item:declared->second)if(item.model==entry->model_name){
+            entry->slot=item.slot;entry->display_name=item.name;entry->has_palette=item.has_palette;entry->palette=item.palette;player=true;break;
+        }
         for(const char *slot:{"mario","luigi","wario","waluigi","toad_player","sunshine"})
-            if(file==std::string(slot)+"_geo.bin"){entry->slot=slot;player=true;break;}
+            if(!player&&file==std::string(slot)+"_geo.bin"){entry->slot=slot;player=true;break;}
         if(!player) {
             std::string actor=file.substr(0,file.size()-4);bool known=false;
             for(const auto &native:native_actors)if(native.layout&&actor==native.name){known=true;break;}
@@ -293,7 +318,7 @@ void dynos_init(void) {
     dynos_mods_enabled=configModsEnabled?1:0;
     active={configModsEnabled,dynos_texture_choice,dynos_npc_choice,dynos_player_choice};
     fs_set_texture_pack(!active.enabled||!active.texture?"":active.texture==1?nullptr:texture_packs[active.texture-2].path.c_str());
-    DYNOS_LOG("DYNOS_INIT version=5 models=%u npc_packs=%u texture_packs=%u scope=mods_menu static_voices=1 star_hand_trace=1",unsigned(entries.size()),unsigned(npc_packs.size()),unsigned(texture_packs.size()));
+    DYNOS_LOG("DYNOS_INIT version=6 models=%u npc_packs=%u texture_packs=%u scope=mods_menu static_voices=1 star_hand_trace=1",unsigned(entries.size()),unsigned(npc_packs.size()),unsigned(texture_packs.size()));
 }
 
 namespace {
@@ -301,7 +326,7 @@ void select_player(unsigned choice) {
     selected_graph=nullptr;applied_choice=choice;dynos_voice_clear();
     if(active.enabled&&choice&&choice<=entries.size()){
         Entry &entry=*entries[choice-1];load_entry(entry);selected_graph=entry.graph;
-        if(selected_graph)dynos_voice_select(entry.pack.c_str(),(entry.slot+"_geo").c_str(),128*1024*1024-resident_bytes);
+        if(selected_graph)dynos_voice_select(entry.pack.c_str(),entry.model_name.c_str(),128*1024*1024-resident_bytes);
     }
 }
 void release_models(void) {

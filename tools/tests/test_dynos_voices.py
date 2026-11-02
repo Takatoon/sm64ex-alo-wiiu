@@ -35,6 +35,24 @@ local V={[CHAR_SOUND_YAH_WAH_HOO]={jump,audio_sample_load('hoo.ogg')},[CHAR_SOUN
 local alias=V
 charSelect.character_add_voice(M,alias)""")
         self.assertIn('jump.ogg\thoo.ogg',result);self.assertIn('die.ogg',result)
+    def test_character_models_costumes_and_first_static_palette(self):
+        lua="""local M=smlua_model_util_get_id('smario_geo')
+local L=smlua_model_util_get_id('sluigi_geo')
+local CAP=smlua_model_util_get_id('cap_geo')
+local P={[PANTS]='123456',[SHIRT]='222222',[GLOVES]='ffffff',[SHOES]='111111',[HAIR]='222222',[SKIN]='123456',[CAP]='ffffff',[EMBLEM]='444444'}
+local Q={[PANTS]='ffffff',[SHIRT]='222222',[GLOVES]='ffffff',[SHOES]='111111',[HAIR]='222222',[SKIN]='123456',[CAP]='ffffff',[EMBLEM]='444444'}
+local CT=_G.charSelect.character_add('Mario ', 'desc','author','ffffff',M,CT_MARIO,gTextures.icon,1)
+_G.charSelect.character_add_costume(CT,'Luigi ','desc','author','ffffff',L,CT_LUIGI,gTextures.icon,1)
+_G.charSelect.character_add_palette_preset(M,P)
+_G.charSelect.character_add_palette_preset(M,Q)"""
+        result=self.parse(lua,'--players')
+        self.assertEqual(len(result.splitlines()),2)
+        self.assertIn('smario_geo\tMario\tmario\t1\t1193046',result)
+        self.assertIn('sluigi_geo\tLuigi\tluigi\t0',result)
+        self.assertNotIn('cap_geo',result)
+    def test_dynamic_or_unsafe_player_model_is_not_discovered(self):
+        self.parse("character_add('X','d','a','ffffff',choose_model(),CT_MARIO)",'--players',False)
+        self.parse("character_add('X','d','a','ffffff',smlua_model_util_get_id('../bad_geo'),CT_MARIO)",'--players',False)
     def test_single_table_without_registration(self):
         self.assertIn('jump.ogg',self.parse("local V={[CHAR_SOUND_YAH_WAH_HOO]='jump.ogg'}"))
     def test_comments_strings_and_long_comments_are_not_code(self):
