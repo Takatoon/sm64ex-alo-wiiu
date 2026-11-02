@@ -58,6 +58,11 @@ include the experimental crouch/D-pad selector. On Wii U, hold physical
 Minus and press D-pad Left/Right to cycle player appearances, including VANILLA.
 This works with GamePad, Pro Controller, Classic Controller and Wii Remote
 with Nunchuk. Each press changes once; holding the direction does not repeat.
+The shortcut skips BINs that fail to load, in the requested direction, without
+selecting their vanilla fallback or clearing the current voice set first.
+VANILLA remains an explicit choice. Rejected entries are not retried until
+Apply Changes or a restart resets them. If all BINs are rejected, cycling ends
+at VANILLA; an already-active VANILLA does not trigger another config save.
 The chord consumes its direction to avoid changing camera/menu at the same time.
 Selection is saved after the requested model has loaded, before the next frame.
 

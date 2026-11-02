@@ -361,11 +361,20 @@ void dynos_update(void) {
     if(pending_step){
         if(active.enabled&&!apply_requested){
             unsigned count=entries.size()+1;
-            active.player=(active.player+(pending_step>0?1:count-1))%count;
-            dynos_player_choice=active.player;select_player(active.player);save_selection();
-            // Keep the original fast shortcut: retain old graphs until the
-            // next explicit Apply instead of reloading the level texture set.
-            DYNOS_LOG("DYNOS_PLAYER_SHORTCUT choice=%u",active.player);
+            unsigned choice=active.player;
+            for(unsigned tried=0;tried<count;++tried){
+                choice=(choice+(pending_step>0?1:count-1))%count;
+                // Validate before touching the current graph or voice set.
+                // Previously rejected entries return immediately from load_entry.
+                if(choice&&!load_entry(*entries[choice-1]))continue;
+                if(choice!=active.player){
+                    active.player=choice;dynos_player_choice=choice;
+                    select_player(choice);save_selection();
+                    // Retain old graphs until explicit Apply, as before.
+                    DYNOS_LOG("DYNOS_PLAYER_SHORTCUT choice=%u",choice);
+                }
+                break; // VANILLA is always valid, even if every BIN fails.
+            }
         }
         pending_step=0;
     }

@@ -1,5 +1,7 @@
 #include <cassert>
 #include <cstdlib>
+#include <fstream>
+#include <string>
 #include <vector>
 #include "pc/dynos/dynos.h"
 extern "C" {
@@ -51,9 +53,41 @@ STUB(geo_scale_bowser_key) STUB(geo_offset_klepto_held_object)
 STUB(geo_switch_peach_eyes)
 static GraphNode part(){GraphNode n{};n.type=GRAPH_NODE_TYPE_ANIMATED_PART;return n;}
 static void apply(){dynos_request_apply();dynos_update();assert(!dynos_apply_pending());}
+static void shortcut_scenario(const char *directory,bool empty) {
+    dynos_init();dynos_update();assert(dynos_player_choice==0);
+    GraphNode original{};
+    auto step=[](int direction){dynos_request_player_step(direction);dynos_update();};
+    if(empty){
+        assert(dynos_player_count()==1);
+        for(int direction:{1,-1,1,-1})step(direction);
+        assert(dynos_player_choice==0&&saves==0&&dynos_resident_bytes()==0);
+        dynos_shutdown();return;
+    }
+    assert(dynos_player_count()==7);
+    dynos_texture_choice=0; // shortcut must not apply staged texture changes
+    step(1);assert(dynos_player_choice==3&&configDynosModel!=0&&saves==1);
+    assert(dynos_player_graph(&original)!=&original&&configDynosTexturePack==1&&dynos_texture_choice==0&&clears==0);
+    unsigned first=configDynosModel;
+    step(1);assert(dynos_player_choice==5&&configDynosModel!=first&&saves==2);unsigned second=configDynosModel;
+    step(1);assert(dynos_player_choice==0&&configDynosModel==0&&saves==3&&dynos_player_graph(&original)==&original);
+    step(-1);assert(dynos_player_choice==5&&configDynosModel==second&&saves==4);
+    step(-1);assert(dynos_player_choice==3&&configDynosModel==first&&saves==5);
+    step(-1);assert(dynos_player_choice==0&&configDynosModel==0&&saves==6);
+    // Replacing the valid files after Apply proves a whole rejected catalog
+    // terminates in both directions and does not repeatedly save VANILLA.
+    std::ofstream(std::string(directory)+"/dynos/packs/02 valid/mario_geo.bin")<<"bad";
+    std::ofstream(std::string(directory)+"/dynos/packs/04 valid/mario_geo.bin")<<"bad";
+    dynos_texture_choice=1;apply();int before=saves;
+    step(1);step(-1);assert(dynos_player_choice==0&&configDynosModel==0&&saves==before);
+    assert(dynos_player_graph(&original)==&original);
+    dynos_mods_enabled=0;apply();before=saves;
+    step(1);step(-1);assert(saves==before&&dynos_player_choice==0&&dynos_resident_bytes()==0);
+    dynos_shutdown();
+}
 int main(int argc,char **argv) {
-    assert(argc==2);const char *ro[]={nullptr};assert(fs_init(ro,"absent",argv[1]));
+    assert(argc==2||argc==3);const char *ro[]={nullptr};assert(fs_init(ro,"absent",argv[1]));
     dynos_set_reload_hooks(begin_reload,end_reload);
+    if(argc==3){shortcut_scenario(argv[1],std::string(argv[2])=="empty");return 0;}
     dynos_init();assert(dynos_player_count()==2);assert(dynos_npc_pack_count()==4);dynos_update();
     GraphNode root=part(),a=part(),b=part();
     root.next=root.prev=&root;root.children=&a;a.next=&b;b.next=&a;

@@ -30,6 +30,30 @@ class DynosNpcTest(unittest.TestCase):
             self.assertIn('A broken/actors/toad_geo.bin reason=',result.stdout)
             self.assertIn('DYNOS_NPC_BOUND actor=toad_geo path=dynos/packs/B valid/',result.stdout)
             self.assertIn('C alternate/actors/toad_geo.bin',result.stdout)
+    def test_player_shortcut_skips_rejected_models_in_both_directions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder=Path(temporary)
+            for pack,filename,data in [('00 bad','mario',b'bad'),('01 incompatible','luigi',geometry(parents=[-1,0])),
+                                       ('02 valid','mario',geometry()),('03 bad','wario',b'bad'),
+                                       ('04 valid','mario',geometry()),('05 bad','waluigi',b'bad')]:
+                file=folder/'dynos/packs'/pack/(filename+'_geo.bin');file.parent.mkdir(parents=True);file.write_bytes(data)
+            includes=['-I.','-Iinclude','-Isrc','-DDYNOS=1','-DEXTERNAL_DATA=1','-DUSE_SYSTEM_MALLOC=1']
+            objects=[]
+            for source in ['src/pc/fs/fs.c','src/pc/fs/fs_packtype_dir.c','src/pc/fs/fs_packtype_zip.c','src/pc/fs/dirtree.c','src/pc/platform.c']:
+                obj=folder/(Path(source).stem+'.o');objects.append(str(obj))
+                subprocess.run(['gcc',*includes,'-D_LANGUAGE_C=1','-c',source,'-o',str(obj)],cwd=ROOT,check=True)
+            exe=folder/'runtime'
+            subprocess.run(['g++','-std=c++17',*includes,'-D_LANGUAGE_C_PLUS_PLUS=1','-DF3DEX_GBI_2=1','-DF3DEX_GBI_2E=1',
+                            'src/pc/dynos/dynos.cpp','src/pc/dynos/dynos_graph.cpp','src/pc/dynos/dynos_model.cpp',
+                            'src/pc/dynos/dynos_voice.cpp','src/pc/dynos/dynos_voice_manifest.cpp',
+                            'tools/tests/dynos_runtime_test.cpp',*objects,'-lvorbisfile','-lvorbis','-logg','-o',str(exe)],cwd=ROOT,check=True)
+            result=subprocess.run([str(exe),str(folder),'shortcut'],cwd=ROOT,check=True,capture_output=True,text=True)
+            self.assertEqual(result.stdout.count('DYNOS_PLAYER_SHORTCUT'),6)
+            for pack in ('00 bad','01 incompatible','03 bad','05 bad'):
+                # One rejection before Apply and one after its explicit reset.
+                self.assertEqual(result.stdout.count('DYNOS_REJECT path=dynos/packs/'+pack+'/'),2)
+            empty=folder/'empty';empty.mkdir()
+            subprocess.run([str(exe),str(empty),'empty'],cwd=ROOT,check=True,capture_output=True,text=True)
     def test_native_actor_hierarchy_switches_lods_and_cycles(self):
         with tempfile.TemporaryDirectory() as temporary:
             exe=Path(temporary)/'graph'
