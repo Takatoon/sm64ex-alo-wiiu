@@ -143,6 +143,24 @@ Both modes are supported, so the choice depends on whether you prefer a longer i
 
 See the [build guide](docs/wiiu-docker.md) for the complete workflow, the [storage layout documentation](docs/wiiu-storage-layout.md) for runtime paths and legacy compatibility, and the [profiling guide](docs/wiiu-load-profiling.md) for optional measurements.
 
+### Minimap generator
+
+[SM64 Map Extractor](https://github.com/Takatoon/SM64-map-extractor) is maintained
+in a separate repository and referenced here as a pinned Git submodule at
+`tools/map-extractor`. It contains the Blender renderer, the 64 map recipes,
+artistic effects and its own Docker environment.
+
+Download the recorded version with:
+
+```sh
+git submodule update --init tools/map-extractor
+```
+
+See the [minimap extractor guide](docs/minimap-extractor.md) for configuration,
+Docker usage and version updates. This is an optional generation tool; the
+normal Wii U build does not run it automatically. GamePad minimap runtime
+integration is being developed separately.
+
 ### Optional DynOS model packs
 
 Enable this feature when building by passing `--dynos enabled` to the Wii U
