@@ -1320,6 +1320,7 @@ $(WIIU_MINIMAP_DIR)/wiiu_minimap_generated.inc.h:
 $(BUILD_DIR)/src/pc/wiiu_minimap.o: $(WIIU_MINIMAP_DIR)/wiiu_minimap_generated.inc.h
 
 $(BASEPACK_LST): $(WIIU_MINIMAP_DIR)/pack.lst $(wildcard $(WIIU_MINIMAP_DIR)/*.png)
+$(BASEPACK_LST): $(wildcard textures/minimap/theme/*.png)
 endif
 
 $(BASEPACK_LST): $(EXE_DEPEND)

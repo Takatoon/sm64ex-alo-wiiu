@@ -115,8 +115,12 @@ static bool g_drc_gpu_zoom = false;
 static uint32_t g_drc_map_generation = 0;
 static uint16_t g_drc_dirty_left[480], g_drc_dirty_right[480];
 static WiiUMapView g_drc_map_view = {0, 0, 1};
+static bool g_drc_framed_layout = false;
 
 #ifdef EXTERNAL_DATA
+static bool g_drc_prefer_framed_layout = true;
+static bool g_drc_theme_labels_valid = false;
+static int g_drc_theme_counter = -1;
 struct WiiUMinimapTextureCache {
     const char* path;
     uint8_t* pixels;
@@ -494,7 +498,7 @@ static inline uint8_t* gfx_gx2_drc_pixel(uint8_t* buffer, int x, int y)
 
 static const WiiUMapRect& gfx_gx2_drc_map_rect(void)
 {
-    return WIIU_MAP_CLASSIC_RECT;
+    return g_drc_framed_layout ? WIIU_MAP_FRAMED_RECT : WIIU_MAP_CLASSIC_RECT;
 }
 
 static bool gfx_gx2_drc_contains(const WiiUMapRect& rect, int x, int y)
@@ -612,6 +616,11 @@ static void gfx_gx2_preload_minimap_textures(void)
     g_minimap_textures_preloaded = true;
 }
 
+static const char* const g_drc_theme_background = "gfx/textures/minimap/theme/fondo.png";
+static const char* const g_drc_theme_frame = "gfx/textures/minimap/theme/marco-mapa.png";
+static void gfx_gx2_compose_drc_theme_base(void);
+static void gfx_gx2_draw_drc_theme_map(const WiiUMapView& view);
+static void gfx_gx2_draw_drc_theme_trim(const WiiUMapRect& clip);
 #endif
 
 static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
@@ -639,7 +648,7 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
     }
 
 #ifdef EXTERNAL_DATA
-    WiiUMinimapTextureCache* panel_texture = gfx_gx2_load_minimap_texture(
+    WiiUMinimapTextureCache* panel_texture = g_drc_framed_layout ? nullptr : gfx_gx2_load_minimap_texture(
         "gfx/textures/inside/inside_castle_textures.0B000.rgba16.png");
     if (panel_texture) {
         /* Tile at a fixed logical size even when an HD replacement is loaded.
@@ -692,12 +701,12 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
         for (uint32_t y = 0; y < DRC_MAP_SIZE; ++y)
             memcpy(g_drc_map_pixels + y * DRC_MAP_SIZE * 4,
                    gfx_gx2_drc_pixel(g_drc_panel_base, 0, y), DRC_MAP_SIZE * 4);
-        if (!g_drc_map_zoom_rows) {
+        if (!g_drc_framed_layout && !g_drc_map_zoom_rows) {
             g_drc_map_zoom_rows = (uint8_t*)malloc(DRC_MAP_SIZE * 2 * DRC_MAP_SIZE * 4);
             WHBLogPrintf("[gamepad-panel] zoom rows cache=%u bytes",
                          g_drc_map_zoom_rows ? DRC_MAP_SIZE * 2 * DRC_MAP_SIZE * 4 : 0);
         }
-        if (g_drc_map_zoom_rows) {
+        if (!g_drc_framed_layout && g_drc_map_zoom_rows) {
             for (uint32_t y = 0; y < DRC_MAP_SIZE; ++y) {
                 const uint8_t* source = g_drc_map_pixels + y * DRC_MAP_SIZE * 4;
                 uint8_t* dest = g_drc_map_zoom_rows + y * DRC_MAP_SIZE * 8;
@@ -709,7 +718,7 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
         }
     }
     ++g_drc_map_generation;
-    if (g_drc_gpu_zoom && g_drc_map_pixels) {
+    if (!g_drc_framed_layout && g_drc_gpu_zoom && g_drc_map_pixels) {
         /* The GPU draws the map behind this premultiplied UI layer. Panning
          * never modifies or recopies these transparent map pixels. */
         for (uint32_t y = 0; y < DRC_MAP_SIZE; ++y)
@@ -718,7 +727,7 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
     g_drc_map_view = {0, 0, 1};
 
     /* A subtle divider reserves the right-hand 374 pixels for the HUD panel. */
-    for (uint32_t y = 0; y < DRC_HEIGHT; ++y)
+    for (uint32_t y = 0; !g_drc_framed_layout && y < DRC_HEIGHT; ++y)
     {
         for (uint32_t x = DRC_MAP_SIZE; x < DRC_MAP_SIZE + 3; ++x)
         {
@@ -730,6 +739,10 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
         }
     }
 
+#ifdef EXTERNAL_DATA
+    if (g_drc_framed_layout)
+        gfx_gx2_compose_drc_theme_base();
+#endif
     memcpy(g_drc_panel_image_data, g_drc_panel_base,
            g_drc_panel_color_buffer.surface.imageSize);
     /* Flush once after the HUD, title and marker have also been composed. */
@@ -744,7 +757,8 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
 
 static WiiUMapView gfx_gx2_update_drc_map_view(const WiiUMinimapFrame& frame)
 {
-    const bool cpu_zoom_available = g_drc_map_zoom_rows != nullptr;
+    const bool cpu_zoom_available = g_drc_framed_layout ? g_drc_map_pixels != nullptr
+                                                        : g_drc_map_zoom_rows != nullptr;
     WiiUMapView view = wiiu_map_view(g_drc_map_zoomed && (g_drc_gpu_zoom || cpu_zoom_available),
                                      frame.mario_x, frame.mario_y);
     if (view.x == g_drc_map_view.x && view.y == g_drc_map_view.y &&
@@ -758,6 +772,16 @@ static WiiUMapView gfx_gx2_update_drc_map_view(const WiiUMinimapFrame& frame)
         return view;
     }
 
+#ifdef EXTERNAL_DATA
+    if (g_drc_framed_layout) {
+        gfx_gx2_draw_drc_theme_map(view);
+        const WiiUMapRect& rect = WIIU_MAP_FRAMED_RECT;
+        gfx_gx2_draw_drc_theme_trim(rect);
+        for (int y = rect.y; y < rect.y + rect.height; ++y)
+            memcpy(gfx_gx2_drc_pixel((uint8_t*)g_drc_panel_image_data, rect.x, y),
+                   gfx_gx2_drc_pixel(g_drc_panel_base, rect.x, y), rect.width * 4);
+    } else
+#endif
     for (uint32_t y = 0; y < DRC_MAP_SIZE; ++y) {
         uint8_t* dest = gfx_gx2_drc_pixel(g_drc_panel_base, 0, y);
         const uint8_t* source = view.scale == 1
@@ -1029,6 +1053,53 @@ static void gfx_gx2_draw_drc_image(const WiiUMinimapTextureCache* texture, int x
     gfx_gx2_blit_drc_image((uint8_t*)g_drc_panel_image_data, texture, x, y, width, height, clip);
 }
 
+static void gfx_gx2_draw_drc_theme_trim(const WiiUMapRect& clip)
+{
+    const WiiUMapRect& button = WIIU_MAP_ZOOM_BUTTON;
+    gfx_gx2_blit_drc_image(g_drc_panel_base, gfx_gx2_load_minimap_texture(g_drc_theme_frame),
+                           20, 43, 458, 404, clip);
+    gfx_gx2_blit_drc_image(g_drc_panel_base,
+                           gfx_gx2_load_minimap_texture("gfx/textures/minimap/theme/lupa.png"),
+                           button.x, button.y, button.width, button.height, clip);
+}
+
+static void gfx_gx2_draw_drc_theme_map(const WiiUMapView& view)
+{
+    if (!g_drc_map_pixels)
+        return;
+    const WiiUMapRect& rect = WIIU_MAP_FRAMED_RECT;
+    int source_x[WIIU_MAP_SIZE];
+    for (int x = 0; x < rect.width; ++x)
+        source_x[x] = wiiu_map_sample(x, rect.width, view.x, view.scale);
+    for (int y = 0; y < rect.height; ++y) {
+        const int source_y = wiiu_map_sample(y, rect.height, view.y, view.scale);
+        const uint8_t* source = g_drc_map_pixels + source_y * WIIU_MAP_SIZE * 4;
+        uint8_t* dest = gfx_gx2_drc_pixel(g_drc_panel_base, rect.x, rect.y + y);
+        for (int x = 0; x < rect.width; ++x)
+            memcpy(dest + x * 4, source + source_x[x] * 4, 4);
+    }
+}
+
+static void gfx_gx2_compose_drc_theme_base(void)
+{
+    const WiiUMinimapTextureCache* background = gfx_gx2_load_minimap_texture(g_drc_theme_background);
+    for (unsigned y = 0; y < DRC_HEIGHT; ++y)
+        memcpy(gfx_gx2_drc_pixel(g_drc_panel_base, 0, y),
+               background->pixels + y * DRC_WIDTH * 4, DRC_WIDTH * 4);
+
+    const WiiUMapRect& rect = WIIU_MAP_FRAMED_RECT;
+    if (g_drc_gpu_zoom) {
+        for (int y = rect.y; y < rect.y + rect.height; ++y)
+            memset(gfx_gx2_drc_pixel(g_drc_panel_base, rect.x, y), 0, rect.width * 4);
+    } else if (g_drc_map_pixels) {
+        // Draw the map before its translucent rim and zoom button.
+        gfx_gx2_draw_drc_theme_map({0, 0, 1});
+    }
+    gfx_gx2_draw_drc_theme_trim(g_drc_screen_rect);
+    g_drc_theme_labels_valid = false;
+    g_drc_theme_counter = -1;
+}
+
 static void gfx_gx2_draw_drc_texture(const char* path, int x, int y, int width, int height,
                                      const WiiUMapRect& clip = g_drc_screen_rect)
 {
@@ -1114,6 +1185,13 @@ static void gfx_gx2_draw_hud_number(int value, int x, int y, int size)
 
 static void gfx_gx2_draw_drc_hud_row(const char* icon_path, int value, int y)
 {
+    if (g_drc_framed_layout) {
+        gfx_gx2_draw_drc_texture(icon_path, 606, y, 40, 40);
+        gfx_gx2_draw_drc_texture(g_hud_multiply_path, 657, y + 10, 20, 20);
+        const int size = value > 999 ? 32 : 42;
+        gfx_gx2_draw_hud_number(value, 690, y + (40 - size) / 2, size);
+        return;
+    }
     const int icon_x = DRC_MAP_SIZE + 58;
     const int multiply_x = DRC_MAP_SIZE + 126;
     const int number_right = DRC_WIDTH - 32;
@@ -1127,6 +1205,8 @@ static void gfx_gx2_draw_drc_hud_row(const char* icon_path, int value, int y)
 
 static void gfx_gx2_draw_drc_hud_separator(int y)
 {
+    if (g_drc_framed_layout)
+        return;
     for (int separator_y = y; separator_y < y + 2; ++separator_y)
     {
         for (int x = DRC_MAP_SIZE + 24; x < (int)DRC_WIDTH - 24; ++x)
@@ -1136,9 +1216,9 @@ static void gfx_gx2_draw_drc_hud_separator(int y)
 
 static void gfx_gx2_draw_drc_power_meter(int wedges, const WiiUMapRect& clip)
 {
-    const int size = 200;
+    const int size = g_drc_framed_layout ? 208 : 200;
     const int x = 667 - size / 2;
-    const int y = 230;
+    const int y = g_drc_framed_layout ? 201 : 230;
     const int half_width = size / 2;
     gfx_gx2_draw_drc_texture(g_power_left_path, x, y, half_width, size, clip);
     gfx_gx2_draw_drc_texture(g_power_right_path, x + half_width, y,
@@ -1160,7 +1240,7 @@ static void gfx_gx2_draw_drc_timer(uint16_t timer)
     int seconds = (timer % 1800) / 30;
     int tenths = (timer % 30) / 3;
     const int width = gfx_gx2_hud_number_width(minutes, size) + 5 * size;
-    const int y = 440;
+    const int y = g_drc_framed_layout ? 394 : 440;
     int x = 667 - width / 2;
 
     gfx_gx2_draw_hud_number(minutes, x, y, size);
@@ -1238,6 +1318,10 @@ static void gfx_gx2_restore_drc_rect(const WiiUMapRect& rect)
     }
 }
 
+#ifdef EXTERNAL_DATA
+#include "wiiu_gamepad_theme.inc.h"
+#endif
+
 static void gfx_gx2_update_drc_hud(void)
 {
     WiiUGamePadHudFrame frame = {};
@@ -1250,7 +1334,10 @@ static void gfx_gx2_update_drc_hud(void)
     frame.music_valid = false;
     // Only tenths are displayed. Raw 30 Hz timer ticks must not invalidate
     // the HUD on every tick (or twice per tick in a 60 FPS build).
-    if (frame.flags & WIIU_GAMEPAD_HUD_TIMER)
+    if (g_drc_framed_layout) {
+        frame.flags &= ~WIIU_GAMEPAD_HUD_TIMER;
+        frame.timer = 0;
+    } else if (frame.flags & WIIU_GAMEPAD_HUD_TIMER)
         frame.timer = (frame.timer / 3) * 3;
     if (g_drc_hud_valid && visible == g_drc_hud_visible &&
         (!visible || !memcmp(&frame, &g_drc_hud_frame, sizeof(frame))))
@@ -1280,15 +1367,16 @@ static void gfx_gx2_update_drc_hud(void)
     }
 #endif
 
-    const WiiUMapRect hud_rect = {483, 0, 371, 480};
+    const WiiUMapRect hud_rect = g_drc_framed_layout ? WiiUMapRect{483, 35, 371, 357}
+        : WiiUMapRect{483, 0, 371, 480};
     gfx_gx2_restore_drc_rect(hud_rect);
 #ifdef EXTERNAL_DATA
     if (visible)
     {
         int row = 0;
         /* Leave breathing room above the compact status rows. */
-        const int first_row_y = 64;
-        const int row_pitch = 58;
+        const int first_row_y = g_drc_framed_layout ? 54 : 64;
+        const int row_pitch = g_drc_framed_layout ? 46 : 58;
         if (frame.flags & WIIU_GAMEPAD_HUD_LIVES)
         {
             int y = first_row_y + row++ * row_pitch;
@@ -1355,6 +1443,13 @@ static void gfx_gx2_draw_drc_marker(float x, float y, float direction)
                                       arrow_x, arrow_y, 18, direction);
     gfx_gx2_draw_drc_image(gfx_gx2_load_minimap_texture(g_hud_mario_path),
                            center_x - 18, center_y - 18, 36, 36, gfx_gx2_drc_map_rect());
+    const WiiUMapRect& button = WIIU_MAP_ZOOM_BUTTON;
+    if (g_drc_framed_layout && center_x + 40 >= button.x && center_x - 40 < button.x + button.width &&
+        center_y + 40 >= button.y && center_y - 40 < button.y + button.height) {
+        gfx_gx2_restore_drc_rect(button);
+        gfx_gx2_drc_flush_rect(button.x, button.y, button.x + button.width - 1,
+                               button.y + button.height - 1);
+    }
 #else
     for (int py = -9; py <= 9; ++py)
     {
@@ -1458,6 +1553,17 @@ static bool gfx_gx2_prepare_drc_panel(bool touch_pressed)
         g_drc_map_zoomed = !g_drc_map_zoomed;
         WHBLogPrintf("[gamepad-panel] map zoom=%s", g_drc_map_zoomed ? "2x follow" : "full");
     }
+#ifdef EXTERNAL_DATA
+    if (g_drc_prefer_framed_layout && (!g_drc_panel_base_valid || !g_drc_panel_texture_path)) {
+        const bool framed_available = gfx_gx2_framed_layout_available();
+        if (g_drc_framed_layout != framed_available)
+            g_drc_panel_base_valid = false;
+        g_drc_framed_layout = framed_available;
+    } else if (!g_drc_prefer_framed_layout && g_drc_framed_layout) {
+        g_drc_framed_layout = false;
+        g_drc_panel_base_valid = false;
+    }
+#endif
     bool gpu_zoom = g_drc_map_zoomed && g_drc_map_pixels && gfx_gx2_gamepad_ready();
     if (gpu_zoom != g_drc_gpu_zoom) {
         g_drc_gpu_zoom = gpu_zoom;
@@ -1477,7 +1583,10 @@ static bool gfx_gx2_prepare_drc_panel(bool touch_pressed)
     gfx_gx2_restore_drc_marker();
     gfx_gx2_update_drc_hud();
 #ifdef EXTERNAL_DATA
-    gfx_gx2_draw_drc_map_status();
+    if (g_drc_framed_layout)
+        gfx_gx2_draw_drc_theme_status(frame);
+    else
+        gfx_gx2_draw_drc_map_status();
 #endif
     const WiiUMapRect& rect = gfx_gx2_drc_map_rect();
     gfx_gx2_draw_drc_marker(rect.x + (frame.mario_x - view.x) * view.scale * rect.width / DRC_MAP_SIZE,
@@ -1891,7 +2000,7 @@ static void gfx_gx2_window_swap_buffers_begin(void)
         GX2ColorBuffer* panel = &g_drc_panel_color_buffer;
         if (g_drc_gpu_zoom) {
             if (auto* composed = gfx_gx2_gamepad_compose(panel, g_drc_map_pixels,
-                    g_drc_map_generation, g_drc_map_view, WIIU_MAP_CLASSIC_RECT))
+                    g_drc_map_generation, g_drc_map_view, gfx_gx2_drc_map_rect()))
                 panel = composed;
         }
         GX2CopyColorBufferToScanBuffer(panel, GX2_SCAN_TARGET_DRC);

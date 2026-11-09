@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "behavior_data.h"
+#include "course_table.h"
 #include "game/area.h"
 #include "game/game_init.h"
 #include "game/ingame_menu.h"
@@ -83,6 +84,38 @@ static s16 sCurrentRoom = -1;
 static s16 sCurrentLayer = -1;
 static bool sCurrentMoatDrained = false;
 static const struct WiiUMinimapInfo *sCurrentMap = NULL;
+static const char *const sGamePadCourseNames[COURSE_MAX + 1] = {
+#define _(name) name
+#define COURSE_ACTS(course, name, ...) [course] = name,
+#define SECRET_STAR(course, name) [course] = name,
+#define CASTLE_SECRET_STARS(name)
+#define EXTRA_TEXT(index, name)
+#include "text/us/courses.h"
+#undef EXTRA_TEXT
+#undef CASTLE_SECRET_STARS
+#undef SECRET_STAR
+#undef COURSE_ACTS
+#undef _
+};
+
+static const char *minimap_course_name(void) {
+    switch (gCurrLevelNum) {
+        case LEVEL_CASTLE: return "PEACH'S CASTLE";
+        case LEVEL_CASTLE_GROUNDS: return "CASTLE GROUNDS";
+        case LEVEL_CASTLE_COURTYARD: return "CASTLE COURTYARD";
+        default: break;
+    }
+    if (gCurrCourseNum >= COURSE_MIN && gCurrCourseNum < COURSE_CAKE_END) {
+        const char *name = sGamePadCourseNames[gCurrCourseNum];
+        if (name) {
+            while (*name == ' ' || (*name >= '0' && *name <= '9'))
+                ++name;
+            return name;
+        }
+    }
+    return "";
+}
+
 static enum WiiUMinimapMenuScreen sMenuScreen = WIIU_MINIMAP_MENU_PRESS_START;
 static bool sDialogMapActive = false;
 
@@ -271,6 +304,9 @@ bool wiiu_minimap_get_frame(struct WiiUMinimapFrame *frame) {
                             (map->max_z - map->min_z), 0.0f, WIIU_MINIMAP_SIZE - 1.0f);
     frame->mario_direction = gMarioState->faceAngle[1] * (6.28318530717958647692f / 65536.0f);
     frame->texture_changed = changed;
+    frame->course_name = minimap_course_name();
+    frame->course_number = gCurrCourseNum >= COURSE_MIN && gCurrCourseNum <= COURSE_STAGES_MAX
+        ? gCurrCourseNum : 0;
     return true;
 }
 

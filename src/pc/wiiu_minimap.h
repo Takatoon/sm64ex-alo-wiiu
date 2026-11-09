@@ -18,6 +18,8 @@ struct WiiUMinimapFrame {
     float mario_y;
     float mario_direction;
     bool texture_changed;
+    const char *course_name;
+    uint8_t course_number;
 };
 
 enum WiiUMinimapMenuScreen {

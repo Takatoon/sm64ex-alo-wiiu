@@ -118,3 +118,10 @@ docker compose -f docker-compose.wiiu.yml run --rm wiiu-dev bash docker/wiiu/bui
 
 The build puts the staged images in `base.zip` inside the WUHB. Rendering
 is a separate step so recompiling the game can reuse the same map set.
+
+In the game's Display options, set **GamePad Display** to **Status Panel**.
+The panel shows the current map, course and music, the game HUD and the red
+coin counter. When the game starts a timer, the timer occupies the counter's
+place. Tap the GamePad to toggle between the full map and the 2× follow view.
+The framed design uses the included Nunito Bold atlas and keeps the classic
+panel as a fallback. The HUD picks up textures from the active texture pack.

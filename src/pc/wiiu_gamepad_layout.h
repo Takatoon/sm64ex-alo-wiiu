@@ -11,6 +11,13 @@ struct WiiUMapRect {
 };
 
 static const struct WiiUMapRect WIIU_MAP_CLASSIC_RECT = { 0, 0, 480, 480 };
+static const struct WiiUMapRect WIIU_MAP_FRAMED_RECT = { 25, 48, 448, 394 };
+static const struct WiiUMapRect WIIU_MAP_ZOOM_BUTTON = { 434, 403, 33, 33 };
+
+static inline int wiiu_map_sample(int pixel, int pixels, int origin, int scale) {
+    return origin + (2 * pixel + 1) * (WIIU_MAP_SIZE / scale) / (2 * pixels);
+}
+
 struct WiiUMapView {
     int x, y, scale;
 };
