@@ -40,6 +40,9 @@ extern "C" {
 #include "wiiu_dds_rgba.h"
 #include "wiiu_gamepad_font.h"
 #include <coreinit/time.h>
+extern "C" {
+#include "../audio/audio_wiiu_gamepad.h"
+}
 #include "gfx_gx2_gamepad.h"
 #endif
 
@@ -139,6 +142,9 @@ static MEMHeapHandle    g_fg_heap_handle          = nullptr;
 static void gfx_gx2_window_foreground_release_callback(void)
 {
     //WHBLogPrint("To release foreground");
+#ifdef WIIU_MINIMAP
+    wiiu_gamepad_audio_set_foreground(false);
+#endif
 
     // Drain before relinquishing foreground-only heaps and GX2 access.
     if (gfx_gx2_gpu_available())
@@ -1615,6 +1621,9 @@ static bool gfx_gx2_prepare_drc_panel(bool touch_pressed)
 static bool gfx_gx2_window_foreground_acquire_callback(void)
 {
     gfx_gx2_set_gpu_available(true);
+#ifdef WIIU_MINIMAP
+    wiiu_gamepad_audio_set_foreground(true);
+#endif
     //WHBLogPrint("Acquiring foreground");
 
     // Get the MEM1 heap and Foreground Bucket heap handles
@@ -1803,6 +1812,9 @@ static void gfx_gx2_window_init(UNUSED const char*)
     // Initialize GX2
     GX2Init(init_attribs);
     gfx_gx2_set_gpu_available(true);
+#ifdef WIIU_MINIMAP
+    wiiu_gamepad_audio_set_foreground(true);
+#endif
 
     // Create TV and DRC scan, color and depth buffers
     if (!gfx_gx2_window_foreground_acquire_callback())

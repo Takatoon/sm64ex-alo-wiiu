@@ -123,6 +123,68 @@ static inline int16_t clamp16(int32_t v) {
     return (int16_t)v;
 }
 
+#ifdef WIIU_MINIMAP
+static int16_t *sCaptureGame, *sCaptureAlert, *sCaptureChunk;
+static size_t sCaptureFrames, sCaptureChunkFrames;
+static uint16_t sCaptureLeft, sCaptureRight;
+static bool sCaptureNote;
+static int16_t sCaptureBefore[2][512];
+
+void mixer_gamepad_capture_begin(int16_t *game, int16_t *alert, size_t frames) {
+    sCaptureGame = game;
+    sCaptureAlert = alert;
+    sCaptureFrames = frames;
+    sCaptureChunk = NULL;
+    sCaptureNote = false;
+    if (alert) memset(alert, 0, frames * 2 * sizeof(*alert));
+}
+
+void mixer_gamepad_capture_end(void) {
+    sCaptureGame = sCaptureAlert = sCaptureChunk = NULL;
+    sCaptureNote = false;
+}
+
+void mixer_gamepad_chunk(int16_t *game, size_t frames, uint16_t left, uint16_t right) {
+    sCaptureChunk = NULL;
+    if (!sCaptureAlert || frames > 512) return;
+#ifdef NEW_AUDIO_UCODE
+    const unsigned bias = 0x450;
+#else
+    const unsigned bias = 0;
+#endif
+    if (left < bias || right < bias || left - bias + frames * 2 > BUF_SIZE ||
+        right - bias + frames * 2 > BUF_SIZE) return;
+    size_t offset = (size_t)(game - sCaptureGame);
+    if (offset > sCaptureFrames * 2 || frames * 2 > sCaptureFrames * 2 - offset) return;
+    sCaptureChunk = sCaptureAlert + offset;
+    sCaptureChunkFrames = frames;
+    sCaptureLeft = left;
+    sCaptureRight = right;
+}
+
+void mixer_gamepad_note_begin(bool alert) {
+    sCaptureNote = alert && sCaptureChunk != NULL;
+    if (!sCaptureNote) return;
+    memcpy(sCaptureBefore[0], BUF_S16(sCaptureLeft), sCaptureChunkFrames * 2);
+    memcpy(sCaptureBefore[1], BUF_S16(sCaptureRight), sCaptureChunkFrames * 2);
+}
+
+void mixer_gamepad_note_end(void) {
+    if (!sCaptureNote) return;
+    /* Observe the original mix before/after this note, including its native
+     * envelope and headset panning. Never modify DMEM or synthesize a second
+     * time. At clipping, retain only the contribution actually heard on TV. */
+    const int16_t *channels[2] = {BUF_S16(sCaptureLeft), BUF_S16(sCaptureRight)};
+    for (size_t frame = 0; frame < sCaptureChunkFrames; ++frame)
+        for (unsigned channel = 0; channel < 2; ++channel) {
+            int contribution = channels[channel][frame] - sCaptureBefore[channel][frame];
+            size_t index = frame * 2 + channel;
+            sCaptureChunk[index] = clamp16(sCaptureChunk[index] + contribution);
+        }
+    sCaptureNote = false;
+}
+#endif
+
 static inline int32_t clamp32(int64_t v) {
     if (v < -0x7fffffff - 1) {
         return -0x7fffffff - 1;

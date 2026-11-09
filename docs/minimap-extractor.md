@@ -125,3 +125,7 @@ coin counter. When the game starts a timer, the timer occupies the counter's
 place. Tap the GamePad to toggle between the full map and the 2× follow view.
 The framed design uses the included Nunito Bold atlas and keeps the classic
 panel as a fallback. The HUD picks up textures from the active texture pack.
+
+While Status Panel is selected, the GamePad plays the game's original
+near-drowning warning. The TV keeps the full soundtrack and sound effects.
+Selecting Mirror TV restores the regular GamePad mix.

@@ -3,7 +3,16 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <ultra64.h>
+
+#ifdef WIIU_MINIMAP
+void mixer_gamepad_capture_begin(int16_t *game, int16_t *alert, size_t frames);
+void mixer_gamepad_capture_end(void);
+void mixer_gamepad_chunk(int16_t *game, size_t frames, uint16_t left, uint16_t right);
+void mixer_gamepad_note_begin(bool alert);
+void mixer_gamepad_note_end(void);
+#endif
 
 #if defined(VERSION_SH) || defined(VERSION_CN)
 #define NEW_AUDIO_UCODE

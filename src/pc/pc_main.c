@@ -41,6 +41,11 @@
 #include "audio/audio_3ds.h"
 #include "audio/audio_3ds_threading.h"
 
+#ifdef WIIU_MINIMAP
+#include "audio/audio_wiiu_gamepad.h"
+#include "mixer.h"
+#endif
+
 #include "pc_main.h"
 
 #ifdef COMMAND_LINE_OPTIONS
@@ -136,8 +141,19 @@ static inline void patch_interpolations(void) {
 static inline void audio_frame(void) {
     u32 num_audio_samples = audio_api->buffered() < audio_api->get_desired_buffered() ? SAMPLES_HIGH : SAMPLES_LOW;
     static s16 audio_buffer[SAMPLES_HIGH * 2 * 2];
+#ifdef WIIU_MINIMAP
+    static s16 gamepad_alerts[SAMPLES_HIGH * 2 * 2];
+    const bool capture_alert = audio_api == &audio_sdl && wiiu_gamepad_audio_alerts_only();
+#endif
     for (int i = 0; i < 2; i++) {
+#ifdef WIIU_MINIMAP
+        mixer_gamepad_capture_begin(audio_buffer + i * num_audio_samples * 2,
+            capture_alert ? gamepad_alerts + i * num_audio_samples * 2 : NULL, num_audio_samples);
+#endif
         create_next_audio_buffer(audio_buffer + i * (num_audio_samples * 2), num_audio_samples);
+#ifdef WIIU_MINIMAP
+        mixer_gamepad_capture_end();
+#endif
 #ifdef DYNOS
         dynos_voice_mix(audio_buffer + i * (num_audio_samples * 2), num_audio_samples,
             ((float)configMasterVolume / MAX_VOLUME) * ((float)configSfxVolume / MAX_VOLUME));
@@ -145,6 +161,9 @@ static inline void audio_frame(void) {
     }
 
     audio_api->play((u8 *)audio_buffer, 2 * num_audio_samples * 4);
+#ifdef WIIU_MINIMAP
+    if (capture_alert) wiiu_gamepad_audio_queue(gamepad_alerts, 2 * num_audio_samples);
+#endif
 }
 #endif
 
@@ -161,6 +180,9 @@ void produce_one_frame(void) {
     thread6_rumble_loop(NULL);
 #endif
 #ifndef TARGET_N3DS
+#ifdef WIIU_MINIMAP
+    wiiu_gamepad_audio_set_mode(configWiiUGamePadDisplay == WIIU_GAMEPAD_STATUS_PANEL);
+#endif
     audio_frame();
 #endif
     gfx_end_frame();

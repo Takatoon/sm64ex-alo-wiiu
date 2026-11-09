@@ -4,6 +4,11 @@
 
 #include "audio_api.h"
 
+#ifdef WIIU_MINIMAP
+#include "audio_wiiu_gamepad.h"
+#include "../configfile.h"
+#endif
+
 static SDL_AudioDeviceID dev;
 
 static bool audio_sdl_init(void) {
@@ -23,6 +28,9 @@ static bool audio_sdl_init(void) {
         fprintf(stderr, "SDL_OpenAudio error: %s\n", SDL_GetError());
         return false;
     }
+#ifdef WIIU_MINIMAP
+    wiiu_gamepad_audio_init(configWiiUGamePadDisplay == WIIU_GAMEPAD_STATUS_PANEL);
+#endif
     SDL_PauseAudioDevice(dev, 0);
     return true;
 }
@@ -46,6 +54,9 @@ static void audio_sdl_shutdown(void)
 {
     if (SDL_WasInit(SDL_INIT_AUDIO)) {
         if (dev != 0) {
+#ifdef WIIU_MINIMAP
+            wiiu_gamepad_audio_shutdown();
+#endif
             SDL_CloseAudioDevice(dev);
             dev = 0;
         }

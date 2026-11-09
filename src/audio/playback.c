@@ -1133,6 +1133,9 @@ void note_init_for_layer(struct Note *note, struct SequenceChannelLayer *seqLaye
     UNUSED s32 pad[4];
     s16 instId;
     struct NoteSubEu *sub = &note->noteSubEu;
+#ifdef WIIU_MINIMAP
+    note->gamepadAlert = audio_channel_is_drowning_alert(seqLayer->seqChannel);
+#endif
 
     note->prevParentLayer = NO_LAYER;
     note->parentLayer = seqLayer;
@@ -1169,6 +1172,9 @@ void note_init_for_layer(struct Note *note, struct SequenceChannelLayer *seqLaye
 }
 #else
 s32 note_init_for_layer(struct Note *note, struct SequenceChannelLayer *seqLayer) {
+#ifdef WIIU_MINIMAP
+    note->gamepadAlert = audio_channel_is_drowning_alert(seqLayer->seqChannel);
+#endif
     note->prevParentLayer = NO_LAYER;
     note->parentLayer = seqLayer;
     note->priority = seqLayer->seqChannel->notePriority;
@@ -1436,6 +1442,9 @@ void note_init_all(void) {
         note->stereoHeadsetEffects = FALSE;
 #endif
         note->priority = NOTE_PRIORITY_DISABLED;
+#ifdef TARGET_WII_U
+        note->gamepadAlert = FALSE;
+#endif
 #if defined(VERSION_SH) || defined(VERSION_CN)
         note->unkSH34 = 0;
 #endif

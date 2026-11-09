@@ -651,6 +651,9 @@ struct Note {
     /*0x84, 0x8C*/ struct VibratoState vibratoState;
     u8 pad3[8];
     /*    , 0xB0, 0xB4*/ struct NoteSubEu noteSubEu;
+#ifdef WIIU_MINIMAP
+    u8 gamepadAlert;
+#endif
 }; // size = 0xC0, known to be 0xC8 on SH
 #else
 // volatile Note, needed in synthesis_process_notes
@@ -706,6 +709,9 @@ struct Note {
     /*0xA2*/ s16 unused2; // never read, set to 0
     /*0xA4, 0x00*/ struct AudioListItem listItem;
     /*          */ u8 pad2[0xc];
+#ifdef WIIU_MINIMAP
+    u8 gamepadAlert;
+#endif
 }; // size = 0xC0
 #endif
 
