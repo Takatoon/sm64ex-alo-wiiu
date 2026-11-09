@@ -44,6 +44,16 @@ enum WiiUAspectRatio {
     WIIU_ASPECT_RATIO_COUNT,
 };
 
+#ifdef WIIU_MINIMAP
+enum WiiUGamePadDisplay {
+    WIIU_GAMEPAD_MIRROR_TV,
+    WIIU_GAMEPAD_STATUS_PANEL,
+    WIIU_GAMEPAD_OFF,
+    WIIU_GAMEPAD_DISPLAY_COUNT,
+};
+
+extern unsigned int configWiiUGamePadDisplay;
+#endif
 extern unsigned int configWiiUInternalResolution;
 extern unsigned int configWiiUAspectRatio;
 #endif

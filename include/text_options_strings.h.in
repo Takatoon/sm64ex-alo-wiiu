@@ -80,6 +80,12 @@
 #define TEXT_OPT_ASPECT    _("ASPECT RATIO")
 #define TEXT_OPT_ASPECT_169 _("16:9")
 #define TEXT_OPT_ASPECT_43  _("4:3")
+#ifdef WIIU_MINIMAP
+#define TEXT_OPT_GAMEPAD_DISPLAY _("GAMEPAD DISPLAY")
+#define TEXT_OPT_GAMEPAD_MIRROR  _("MIRROR TV")
+#define TEXT_OPT_GAMEPAD_PANEL   _("STATUS PANEL")
+#define TEXT_OPT_GAMEPAD_OFF     _("OFF")
+#endif
 #define TEXT_OPT_FSCREEN   _("FULLSCREEN")
 #define TEXT_OPT_NEAREST   _("NEAREST")
 #define TEXT_OPT_LINEAR    _("LINEAR")
@@ -166,6 +172,12 @@
 #define TEXT_OPT_ASPECT    _("Aspect Ratio")
 #define TEXT_OPT_ASPECT_169 _("16:9")
 #define TEXT_OPT_ASPECT_43  _("4:3")
+#ifdef WIIU_MINIMAP
+#define TEXT_OPT_GAMEPAD_DISPLAY _("GamePad Display")
+#define TEXT_OPT_GAMEPAD_MIRROR  _("Mirror TV")
+#define TEXT_OPT_GAMEPAD_PANEL   _("Status Panel")
+#define TEXT_OPT_GAMEPAD_OFF     _("Off")
+#endif
 #define TEXT_OPT_FSCREEN   _("Fullscreen")
 #define TEXT_OPT_NEAREST   _("Nearest")
 #define TEXT_OPT_LINEAR    _("Linear")

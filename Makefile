@@ -299,6 +299,7 @@ ifeq ($(WIIU_MINIMAP),1)
     $(error WIIU_MINIMAP=1 requires TARGET_WII_U=1 and EXTERNAL_DATA=1)
   endif
   WIIU_MINIMAP_DIR := build/minimap
+  DEFINES += WIIU_MINIMAP=1
 endif
 
 
@@ -782,6 +783,9 @@ endif
 #==============================================================================#
 
 INCLUDE_DIRS := include $(BUILD_DIR) $(BUILD_DIR)/include src .
+ifeq ($(WIIU_MINIMAP),1)
+  INCLUDE_DIRS += $(WIIU_MINIMAP_DIR)
+endif
 ifeq ($(TARGET_N64),1)
   INCLUDE_DIRS += include/gcc
 endif
@@ -1308,6 +1312,12 @@ ifeq ($(WIIU_MINIMAP),1)
 $(WIIU_MINIMAP_DIR)/pack.lst:
 	@echo "Stage the extractor manifest with tools/prepare_wiiu_minimaps.py first." >&2
 	@false
+
+$(WIIU_MINIMAP_DIR)/wiiu_minimap_generated.inc.h:
+	@echo "Stage the extractor manifest with tools/prepare_wiiu_minimaps.py first." >&2
+	@false
+
+$(BUILD_DIR)/src/pc/wiiu_minimap.o: $(WIIU_MINIMAP_DIR)/wiiu_minimap_generated.inc.h
 
 $(BASEPACK_LST): $(WIIU_MINIMAP_DIR)/pack.lst $(wildcard $(WIIU_MINIMAP_DIR)/*.png)
 endif

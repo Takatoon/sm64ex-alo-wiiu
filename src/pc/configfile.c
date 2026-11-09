@@ -63,6 +63,9 @@ ConfigWindow configWindow       = {
 
 unsigned int configFiltering    = 1;          // 0=force nearest, 1=linear
 #ifdef TARGET_WII_U
+#ifdef WIIU_MINIMAP
+unsigned int configWiiUGamePadDisplay = WIIU_GAMEPAD_MIRROR_TV;
+#endif
 unsigned int configWiiUInternalResolution = WIIU_RESOLUTION_AUTO;
 unsigned int configWiiUAspectRatio = WIIU_ASPECT_RATIO_16_9;
 #endif
@@ -161,6 +164,9 @@ static const struct ConfigOption options[] = {
     {.name = "texture_filtering",    .type = CONFIG_TYPE_UINT, .uintValue = &configFiltering},
 #ifdef TARGET_WII_U
     {.name = "internal_resolution",  .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUInternalResolution},
+#ifdef WIIU_MINIMAP
+    {.name = "gamepad_display",      .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUGamePadDisplay},
+#endif
     {.name = "aspect_ratio",         .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUAspectRatio},
 #endif
     {.name = "master_volume",        .type = CONFIG_TYPE_UINT, .uintValue = &configMasterVolume},

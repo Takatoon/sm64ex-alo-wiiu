@@ -14,6 +14,9 @@
 #include "level_table.h"
 #include "seq_ids.h"
 #include "sm64.h"
+#ifdef WIIU_MINIMAP
+#include "pc/wiiu_minimap.h"
+#endif
 #include "title_screen.h"
 
 /**
@@ -238,6 +241,10 @@ s32 intro_play_its_a_me_mario(void) {
  * Returns a level ID after their criteria is met.
  */
 s32 lvl_intro_update(s16 arg, UNUSED s32 unusedArg) {
+#ifdef WIIU_MINIMAP
+    wiiu_minimap_set_menu_screen(arg == LVL_INTRO_LEVEL_SELECT
+        ? WIIU_MINIMAP_MENU_MIRROR_TV : WIIU_MINIMAP_MENU_PRESS_START);
+#endif
 #ifdef KEY_COMBO_LEVEL_SELECT
     if (gPlayer1Controller->buttonDown == (L_TRIG | R_TRIG) && arg == LVL_INTRO_REGULAR) {
         gDebugLevelSelect = TRUE;

@@ -114,6 +114,11 @@ fs_pathlist_t fs_enumerate_model_scripts(const char *pack);
 fs_file_t *fs_open_model(const char *vpath);
 
 fs_pathlist_t fs_texture_packs(void);
+#ifdef WIIU_MINIMAP
+uint32_t fs_texture_pack_generation(void);
+void *fs_load_file_variant(const char *anchor, const char *variant,
+                           uint64_t *outsize, uint64_t limit);
+#endif
 bool fs_set_texture_pack(const char *realpath);
 
 // removes the pack at physical path from the virtual filesystem

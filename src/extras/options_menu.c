@@ -117,6 +117,12 @@ static const u8 optsVideoStr[][SIZEOPTC(32)] = {
     { TEXT_OPT_ASPECT },
     { TEXT_OPT_ASPECT_169 },
     { TEXT_OPT_ASPECT_43 },
+#ifdef WIIU_MINIMAP
+    { TEXT_OPT_GAMEPAD_DISPLAY },
+    { TEXT_OPT_GAMEPAD_MIRROR },
+    { TEXT_OPT_GAMEPAD_PANEL },
+    { TEXT_OPT_GAMEPAD_OFF },
+#endif
 #endif
 };
 #endif
@@ -188,6 +194,13 @@ static const u8 *wiiuResolutionChoices[] = {
     optsVideoStr[9],
     optsVideoStr[10],
 };
+#ifdef WIIU_MINIMAP
+static const u8 *wiiuGamePadDisplayChoices[] = {
+    optsVideoStr[15],
+    optsVideoStr[16],
+    optsVideoStr[17],
+};
+#endif
 static const u8 *wiiuAspectRatioChoices[] = {
     optsVideoStr[12],
     optsVideoStr[13],
@@ -291,6 +304,9 @@ static struct Option optsVideo[] = {
 #ifdef TARGET_WII_U
     DEF_OPT_CHOICE( optsVideoStr[7], &configWiiUInternalResolution, wiiuResolutionChoices ),
     DEF_OPT_CHOICE( optsVideoStr[11], &configWiiUAspectRatio, wiiuAspectRatioChoices ),
+#ifdef WIIU_MINIMAP
+    DEF_OPT_CHOICE( optsVideoStr[14], &configWiiUGamePadDisplay, wiiuGamePadDisplayChoices ),
+#endif
 #endif
     DEF_OPT_CHOICE( optsVideoStr[1], &configFiltering, filterChoices ),
 #if !defined(TARGET_PORT_CONSOLE) && !defined(TARGET_ANDROID)
