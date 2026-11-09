@@ -32,6 +32,11 @@ struct WiiUGamePadHudFrame {
 
 bool wiiu_gamepad_hud_get_frame(struct WiiUGamePadHudFrame *frame);
 
+/* Input and presentation both run on the game thread. Consume presses even
+   while mirroring/off so a touch in a menu cannot toggle the next level. */
+void wiiu_gamepad_set_touch(bool touched);
+bool wiiu_gamepad_take_touch_press(void);
+
 #ifdef __cplusplus
 }
 #endif

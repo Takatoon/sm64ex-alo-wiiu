@@ -1,5 +1,19 @@
 #include "wiiu_gamepad_hud.h"
 
+static bool s_touch_down;
+static bool s_touch_press;
+
+void wiiu_gamepad_set_touch(bool touched) {
+    if (touched && !s_touch_down) s_touch_press = !s_touch_press;
+    s_touch_down = touched;
+}
+
+bool wiiu_gamepad_take_touch_press(void) {
+    bool pressed = s_touch_press;
+    s_touch_press = false;
+    return pressed;
+}
+
 #ifdef WIIU_MINIMAP
 
 #include <string.h>

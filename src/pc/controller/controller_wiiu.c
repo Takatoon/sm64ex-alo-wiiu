@@ -13,6 +13,9 @@
 #include <padscore/kpad.h>
 
 #include "controller_api.h"
+#ifdef WIIU_MINIMAP
+#include "../wiiu_gamepad_hud.h"
+#endif
 #include "../configfile.h"
 #ifdef DYNOS
 #include "../dynos/dynos.h"
@@ -79,6 +82,9 @@ static void read_vpad(OSContPad *pad) {
         return;
     }
 
+#ifdef WIIU_MINIMAP
+    wiiu_gamepad_set_touch(status.tpNormal.touched != 0);
+#endif
     v = status.hold;
 #ifdef DYNOS
     DYNOS_INPUT(0,v,VPAD_BUTTON_);
