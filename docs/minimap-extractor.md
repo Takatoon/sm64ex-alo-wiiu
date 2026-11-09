@@ -93,6 +93,28 @@ For a release checkout, use `git submodule update --init` to restore the
 recorded version. Avoid `--remote` when reproducing a release, because that
 selects a newer upstream version instead of the recorded commit.
 
-This reference makes the extractor available to developers. Automatic map
-generation, packaging and the GamePad runtime integration are separate work;
-the normal Wii U build currently does not invoke this tool.
+## Package the maps for Wii U
+
+Render the full set from the US ROM at 480×480 using the pinned extractor.
+Then prepare its manifest from the game repository root with Python 3.11+,
+Pillow and NumPy:
+
+```sh
+python tools/prepare_wiiu_minimaps.py tools/map-extractor/output/manifest.json
+```
+
+The preparation step derives the marker coordinates from the render frames,
+adds the door marks and applies the configured watercolor style. It stages
+all 64 PNGs and their generated C table under `build/minimap/`. The input
+manifest and its PNGs stay in the extractor output directory.
+
+Use `WIIU_MINIMAP=1` and `EXTERNAL_DATA=1` for the Wii U build. For example,
+after placing the same ROM at `baserom.us.z64` in the game root:
+
+```powershell
+$env:WIIU_MINIMAP = '1'
+docker compose -f docker-compose.wiiu.yml run --rm wiiu-dev bash docker/wiiu/build.sh
+```
+
+The build puts the staged images in `base.zip` inside the WUHB. Rendering
+is a separate step so recompiling the game can reuse the same map set.
