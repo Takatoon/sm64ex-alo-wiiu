@@ -68,6 +68,12 @@ agua y fuego. Sigue siendo una comprobación parcial de RGBA8.
 - Fuera de la compilación de perfilado, el dibujo indexado sigue desactivado
   mientras se valida. RGBA8 sí queda activado.
 
+Prueba posterior en movimiento: el usuario no aprecia nuevos fallos gráficos.
+Con Render96 HD, B registra medianas de **31,3 FPS** en el castillo,
+**31,1** en HMC y **31,6** en COTMC; en VCUTM ronda **26,1**. No aparecen
+avisos de geometría inválida ni excepciones en esta sesión. Son resultados
+por escena, sin comparación A/B controlada de Render96 ni garantía global.
+
 La caché reutiliza un vértice solo dentro del mismo lote y material, con la
 misma versión del vértice y valor de LOD. Se conservan el descarte de caras,
 el orden de los triángulos, la interpolación y las transparencias. Los dos

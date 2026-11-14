@@ -722,3 +722,30 @@ Continue visual validation in B while moving, changing materials/effects,
 entering areas, holding objects and collecting stars; switch to A at the
 same position if an anomaly appears. The known Galaxy metal-cap issue remains
 outside this trial's scope at the user's request.
+
+
+## Indexed gameplay follow-up: Render96 HD
+
+The user played in B and reports no new visual problems, with Render96 HD
+reaching 30 FPS. Capture `../sm64ex-alo/logs/wiiu/indexed-gameplay-session-20261114.log`
+and analysis `../sm64ex-alo/logs/wiiu/indexed-gameplay-analysis-20261114.json`
+retain the extended revision-10 session. No invalid-geometry, shader-failure,
+shader-pool-exhaustion or exception records occur in that revision's subset.
+
+Render96 (choice 5), B windows with no runtime texture loads:
+
+| Area | Windows | Median FPS | Median whole DL |
+| --- | ---: | ---: | ---: |
+| Castle interior | 10 | 31.286 | 26.032 ms |
+| HMC | 8 | 31.145 | 25.917 ms |
+| BOB | 8 | 29.250 | 27.775 ms |
+| Castle grounds | 4 | 27.107 | 27.053 ms |
+| VCUTM | 23 | 26.137 | 26.619 ms |
+| COTMC | 7 | 31.558 | 25.038 ms |
+
+These are gameplay samples with different views, not uniform-level guarantees.
+BOB also has two A windows (~22.6 FPS) but with different player/camera
+coordinates from B; do not present their difference as an isolated A/B gain.
+The earlier ~15 FPS Render96 observation is likewise not a matched comparison.
+The extended visual feedback supports retaining the indexed implementation;
+complete asset/material coverage has not been established by playing briefly.
