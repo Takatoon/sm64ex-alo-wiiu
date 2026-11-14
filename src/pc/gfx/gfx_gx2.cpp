@@ -8,6 +8,9 @@
 #include <math.h>
 
 #include <vector>
+#ifdef WIIU_LOAD_TIMING_PROFILE
+#include <coreinit/time.h>
+#endif
 
 #ifndef _LANGUAGE_C
 #define _LANGUAGE_C
@@ -69,6 +72,13 @@ struct VboBlock
 static std::vector<VboBlock> vbo_blocks;
 static size_t current_vbo_block = 0;
 static const size_t VBO_BLOCK_SIZE = 1024 * 1024;
+
+#ifdef WIIU_LOAD_TIMING_PROFILE
+struct WiiUGx2FrameProfile gfx_gx2_frame_profile = {};
+uint64_t gfx_gx2_profile_ticks_to_us(uint64_t ticks) {
+    return OSTicksToMicroseconds(ticks);
+}
+#endif
 
 static std::vector<Texture> gx2_textures;
 static uint8_t current_tile = 0;
@@ -463,6 +473,7 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
         return;
 
 #ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime validation_begin = OSGetTime();
     // Distinguish corrupt CPU geometry from visibility/cache issues on GX2.
     // Large finite clip coordinates can be valid: do not impose a size cutoff.
     static unsigned int invalid_batches = 0;
@@ -483,6 +494,8 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
             }
         }
     }
+    const OSTime storage_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_VALIDATE] += storage_begin - validation_begin;
     if (!valid)
     {
         if (invalid_batches++ < 8)
@@ -519,20 +532,40 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
         if (!data)
             return;
         vbo_blocks.push_back({data, capacity, 0});
+#ifdef WIIU_LOAD_TIMING_PROFILE
+        ++gfx_gx2_frame_profile.allocations;
+#endif
         current_vbo_block = vbo_blocks.size() - 1;
         block = &vbo_blocks[current_vbo_block];
     }
 
     float* new_vbo = reinterpret_cast<float*>(block->data + block->used);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime copy_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_STORAGE] += copy_begin - storage_begin;
+#endif
     memcpy(new_vbo, buf_vbo, vbo_len);
     block->used += vbo_len;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime publish_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_COPY] += publish_begin - copy_begin;
+    gfx_gx2_frame_profile.vbo_bytes += vbo_len;
+    ++gfx_gx2_frame_profile.draw_calls;
+#endif
 
     // Publish CPU writes and invalidate cached GPU attributes BEFORE queuing
     // their draw. An end-of-frame invalidate is too late if GX2 has already
     // submitted/consumed an earlier command-buffer segment.
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_vbo, vbo_len);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime draw_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_PUBLISH] += draw_begin - publish_begin;
+#endif
     GX2SetAttribBuffer(0, vbo_len, sizeof(float) * current_shader_program->num_floats, new_vbo);
     GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_DRAW] += OSGetTime() - draw_begin;
+#endif
 }
 
 static void gfx_gx2_get_framebuffer(uint16_t *buffer) {
@@ -554,9 +587,15 @@ static void gfx_gx2_start_frame(void)
 
 static void gfx_gx2_end_frame(void) 
 {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime begin = OSGetTime();
+#endif
     // Retain the frame-boundary flush as well; correctness now relies on the
     // per-draw publication above, not on commands staying pending until here.
     gfx_gx2_flush_vbo_cache();
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_BOUNDARY] += OSGetTime() - begin;
+#endif
 }
 
 extern "C" void gfx_gx2_flush_vbo_cache(void)
@@ -571,12 +610,22 @@ extern "C" void gfx_gx2_flush_vbo_cache(void)
 
 static void gfx_gx2_finish_render(void) 
 {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime begin = OSGetTime();
+#endif
     // Wait until drawing is done
     GX2DrawDone();
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime recycle_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_FINISH] += recycle_begin - begin;
+#endif
     // The GPU is finished with the frame, so its VBO storage can be reused.
     for (VboBlock& block : vbo_blocks)
         block.used = 0;
     current_vbo_block = 0;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_RECYCLE] += OSGetTime() - recycle_begin;
+#endif
 }
 
 static void gfx_gx2_shutdown(void) 

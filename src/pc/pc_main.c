@@ -171,6 +171,14 @@ void produce_one_frame(void) {
 #ifdef DYNOS
     dynos_update();
 #endif
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    // The first list contains interpolated transforms; patching restores current.
+#ifdef HIGH_FPS_PC
+    gfx_profile_set_interpolated(true);
+#else
+    gfx_profile_set_interpolated(false);
+#endif
+#endif
     gfx_start_frame();
 
     change_audio_volumes();
@@ -188,6 +196,9 @@ void produce_one_frame(void) {
     gfx_end_frame();
 
 #ifdef HIGH_FPS_PC
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    gfx_profile_set_interpolated(false);
+#endif
     gfx_start_frame();
     patch_interpolations();
     exec_display_list(gGfxSPTask);

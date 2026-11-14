@@ -1998,12 +1998,19 @@ static unsigned int gfx_gx2_window_gamepad_mode(void)
 
 static void gfx_gx2_window_swap_buffers_begin(void)
 {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime tv_begin = OSGetTime();
+#endif
     // Make sure to flush all commands to GPU before copying the color buffer to the scan buffers
     // (Calling GX2DrawDone instead here *may* cause slow downs)
     GX2Flush();
 
     // Copy the color buffer to the TV and DRC scan buffers
     GX2CopyColorBufferToScanBuffer(&g_color_buffer, GX2_SCAN_TARGET_TV);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime drc_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_TV] += drc_begin - tv_begin;
+#endif
 #ifdef WIIU_MINIMAP
     const unsigned mode = gfx_gx2_window_gamepad_mode();
     GX2SetDRCEnable(mode != WIIU_GAMEPAD_OFF);
@@ -2021,6 +2028,10 @@ static void gfx_gx2_window_swap_buffers_begin(void)
     }
 #else
     GX2CopyColorBufferToScanBuffer(&g_color_buffer, GX2_SCAN_TARGET_DRC);
+#endif
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime swap_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_DRC] += swap_begin - drc_begin;
 #endif
     // Flip
     GX2SwapScanBuffers();
@@ -2044,6 +2055,9 @@ static void gfx_gx2_window_swap_buffers_begin(void)
 #ifndef WIIU_MINIMAP
     GX2SetDRCEnable(true);
 #endif
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_SWAP] += OSGetTime() - swap_begin;
+#endif
 }
 
 // 2022/05/13: OSSecondsToTicks provided by WUT does not allow for fractions of seconds
@@ -2051,6 +2065,9 @@ static void gfx_gx2_window_swap_buffers_begin(void)
 
 static void gfx_gx2_window_swap_buffers_end(void)
 {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime mode_begin = OSGetTime();
+#endif
     uint32_t swap_count, flip_count;
     OSTime prev_flip, prev_vsync;
 
@@ -2062,6 +2079,10 @@ static void gfx_gx2_window_swap_buffers_end(void)
 
     uint32_t swap_interval = GX2GetSwapInterval();
     OSTime swap_interval_ticks = swap_interval * OSSecondsF32ToTicks(0.75f / 59.94f);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime wait_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_VIDEO_MODE] += wait_begin - mode_begin;
+#endif
 
     if (swap_interval > 0 || finish_flip_for_resize)
     {
@@ -2072,7 +2093,12 @@ static void gfx_gx2_window_swap_buffers_end(void)
                 break;
 
             if (finish_flip_for_resize || prev_vsync - prev_flip < swap_interval_ticks)
+            {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+                ++gfx_gx2_frame_profile.vsync_waits;
+#endif
                 GX2WaitForVsync();
+            }
 
             else
             {
@@ -2083,10 +2109,17 @@ static void gfx_gx2_window_swap_buffers_end(void)
         }
     }
 
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime apply_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_PRESENT] += apply_begin - wait_begin;
+#endif
     if (!gfx_gx2_window_apply_video_mode_change())
     {
         gfx_gx2_window_exit_callback();
     }
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_VIDEO_MODE] += OSGetTime() - apply_begin;
+#endif
 }
 
 static double gfx_gx2_window_get_time(void)

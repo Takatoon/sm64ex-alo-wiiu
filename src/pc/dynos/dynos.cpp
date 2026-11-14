@@ -453,6 +453,9 @@ GraphNode *dynos_npc_graph_with_animation(GraphNode *original,const Animation *n
 }
 
 GraphNode *dynos_player_graph(GraphNode *original) {return active.enabled&&selected_graph?selected_graph:original;}
+unsigned int dynos_active_player_choice(void) {
+    return active.enabled && selected_graph ? applied_choice : 0;
+}
 unsigned int dynos_player_count(void) {return unsigned(entries.size()+1);}
 const unsigned char **dynos_player_labels(void) {return labels;}
 

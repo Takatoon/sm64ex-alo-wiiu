@@ -17,6 +17,10 @@
 #include "surface_terrains.h"
 #include "rumble_init.h"
 
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include "pc/gfx/gfx_pc.h"
+#endif
+
 s32 check_common_idle_cancels(struct MarioState *m) {
     mario_drop_held_object(m);
     if (m->floor->normal.y < 0.29237169f) {
@@ -118,6 +122,15 @@ s32 act_idle(struct MarioState *m) {
     if (check_common_idle_cancels(m)) {
         return TRUE;
     }
+
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    if (gfx_profile_ab_keep_awake()) {
+        // Keep the normal head-turn animations, but do not enter sleep/shiver
+        // during a same-camera benchmark. Do not synthesize controller input.
+        m->actionTimer = 0;
+        if (m->actionState == 3) m->actionState = 0;
+    }
+#endif
 
     if (m->actionState == 3) {
         if ((m->area->terrainType & TERRAIN_MASK) == TERRAIN_SNOW) {

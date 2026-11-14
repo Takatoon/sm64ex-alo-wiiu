@@ -32,6 +32,24 @@ bool gfx_gx2_gpu_available(void);
 bool gfx_gx2_prepare_options_frame(bool menu_open);
 void gfx_gx2_capture_options_background(void);
 
+#ifdef WIIU_LOAD_TIMING_PROFILE
+/* Render-thread counters in native OS clock ticks. Converted only on report. */
+enum WiiUGx2ProfileMetric {
+    WIIU_GX2_VALIDATE, WIIU_GX2_STORAGE, WIIU_GX2_COPY,
+    WIIU_GX2_PUBLISH, WIIU_GX2_DRAW, WIIU_GX2_BOUNDARY,
+    WIIU_GX2_FINISH, WIIU_GX2_RECYCLE, WIIU_GX2_TV,
+    WIIU_GX2_DRC, WIIU_GX2_SWAP, WIIU_GX2_PRESENT,
+    WIIU_GX2_VIDEO_MODE, WIIU_GX2_PROFILE_COUNT
+};
+struct WiiUGx2FrameProfile {
+    uint64_t ticks[WIIU_GX2_PROFILE_COUNT];
+    uint64_t vbo_bytes;
+    uint32_t allocations, draw_calls, vsync_waits, direct_draws, copied_draws;
+};
+extern struct WiiUGx2FrameProfile gfx_gx2_frame_profile;
+uint64_t gfx_gx2_profile_ticks_to_us(uint64_t ticks);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

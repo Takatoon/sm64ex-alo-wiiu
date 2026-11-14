@@ -22,6 +22,8 @@
 #include "game/game_init.h"
 #include "game/level_update.h"
 #include "game/object_list_processor.h"
+#include "wiiu_geometry_ab.h"
+#include "game/ingame_menu.h"
 #endif
 
 #ifdef EXTERNAL_DATA
@@ -175,6 +177,7 @@ static struct {
     uint32_t draw_calls;
     uint32_t triangles;
     uint32_t frames;
+    uint32_t interval_count;
     uint64_t interval_sum_us;
     uint64_t previous_present_us;
     uint64_t total_sum_us;
@@ -299,11 +302,18 @@ static struct RenderingState {
     struct TextureHashmapNode *textures[2];
 } rendering_state;
 
+
+
 struct GfxDimensions gfx_current_dimensions;
 
 static bool dropped_frame;
 
+#ifdef TARGET_WII_U
+static float buf_vbo_fallback[VERTEX_BUFFER_SIZE];
+static float *buf_vbo = buf_vbo_fallback;
+#else
 static float buf_vbo[VERTEX_BUFFER_SIZE];
+#endif
 static size_t buf_vbo_len;
 static size_t buf_vbo_num_tris;
 
@@ -368,13 +378,167 @@ static void gfx_set_iod(unsigned int iod)
 }
 #endif
 
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+static struct {
+    uint64_t vertex_us, submit_us, vertex_sum_us, submit_sum_us;
+    uint64_t vertices_sum, batches_sum, full_flushes_sum, material_prepares_sum, uniform_prepares_sum;
+    unsigned vertices, batches, full_flushes, material_prepares, uniform_prepares;
+} model_geometry_profile;
+
+static bool gfx_profile_interpolated;
+static struct WiiUGeometryAb geometry_ab;
+static bool geometry_ab_measure;
+static unsigned geometry_ab_run, geometry_ab_frames, geometry_ab_windows;
+static void gfx_profile_ab_update(void);
+bool gfx_profile_ab_keep_awake(void) {
+    // Also hold idle during stabilization and after completion, so sleeping
+    // cannot change the view and automatically restart a completed benchmark.
+    return geometry_ab.initialized;
+}
+void gfx_profile_set_interpolated(bool interpolated) {
+#ifdef HIGH_FPS_PC
+    if (interpolated) gfx_profile_ab_update();
+#else
+    gfx_profile_ab_update();
+#endif
+    gfx_profile_interpolated = interpolated;
+}
+
+struct ModelPhaseProfile {
+    unsigned frames, slow_intervals;
+    uint64_t total_us, pre_us, dl_us, vertex_us, submit_us;
+    uint64_t audio_us, post_us, finish_us, present_us;
+    uint64_t max_total_us, max_finish_us;
+    uint64_t draws, triangles;
+    struct WiiUGx2FrameProfile backend;
+};
+static struct ModelPhaseProfile model_phase_profile[2];
+
+static unsigned long long gfx_profile_avg_ticks(uint64_t ticks, unsigned frames) {
+    return (unsigned long long)(gfx_gx2_profile_ticks_to_us(ticks) / frames);
+}
+
+static void gfx_profile_report_phases(unsigned window, int level, unsigned model) {
+    for (unsigned i = 0; i < 2; ++i) {
+        const struct ModelPhaseProfile *p = &model_phase_profile[i];
+        if (p->frames == 0) continue;
+        const char *phase = i ? "interpolated" : "current";
+#define PHASE_AVG(field) (unsigned long long)(p->field / p->frames)
+        WHBLogPrintf("MODEL_PHASE revision=7 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
+            window, level, model, phase, p->frames, p->slow_intervals,
+            PHASE_AVG(total_us), (unsigned long long)p->max_total_us,
+            PHASE_AVG(pre_us), PHASE_AVG(dl_us), PHASE_AVG(vertex_us),
+            PHASE_AVG(submit_us), PHASE_AVG(audio_us), PHASE_AVG(post_us),
+            PHASE_AVG(finish_us), (unsigned long long)p->max_finish_us,
+            PHASE_AVG(present_us), PHASE_AVG(draws), PHASE_AVG(triangles));
+#undef PHASE_AVG
+#define BACKEND_AVG(metric) gfx_profile_avg_ticks(p->backend.ticks[WIIU_GX2_##metric], p->frames)
+        WHBLogPrintf("MODEL_GX2 revision=7 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u",
+            window, phase, p->frames,
+            BACKEND_AVG(VALIDATE), BACKEND_AVG(STORAGE), BACKEND_AVG(COPY),
+            BACKEND_AVG(PUBLISH), BACKEND_AVG(DRAW), BACKEND_AVG(BOUNDARY),
+            BACKEND_AVG(FINISH), BACKEND_AVG(RECYCLE), BACKEND_AVG(TV),
+            BACKEND_AVG(DRC), BACKEND_AVG(SWAP), BACKEND_AVG(PRESENT),
+            BACKEND_AVG(VIDEO_MODE),
+            (unsigned long long)(p->backend.vbo_bytes / p->frames),
+            p->backend.allocations, p->backend.draw_calls, p->backend.vsync_waits,
+            p->backend.direct_draws, p->backend.copied_draws);
+#undef BACKEND_AVG
+    }
+}
+
+static void gfx_profile_ab_clear_window(void) {
+    memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+    memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+    memset(model_phase_profile, 0, sizeof(model_phase_profile));
+}
+
+static void gfx_profile_ab_update(void) {
+    static bool anchor_valid;
+    static int level, area;
+    static unsigned model, width, height, gamepad, filtering;
+    static float player[3], camera[3], focus[3];
+    static s16 yaw;
+#ifdef DYNOS
+    unsigned current_model = dynos_active_player_choice();
+#else
+    unsigned current_model = 0;
+#endif
+    bool eligible = gCurrentArea != NULL && gMarioState != NULL &&
+        gMarioState->marioObj != NULL && sCurrPlayMode == PLAY_MODE_NORMAL &&
+        get_dialog_id() == -1;
+#ifdef EXT_OPTIONS_MENU
+    eligible = eligible && !optmenu_open;
+#endif
+    bool changed = !anchor_valid || level != gCurrLevelNum || area != gCurrAreaIndex ||
+        model != current_model || width != gfx_current_dimensions.width ||
+        height != gfx_current_dimensions.height || gamepad != configWiiUGamePadDisplay ||
+        filtering != configFiltering;
+    if (eligible && anchor_valid) {
+        for (unsigned i = 0; i < 3; ++i) {
+            changed |= fabsf(player[i] - gMarioState->pos[i]) > 4.0f ||
+                       fabsf(camera[i] - gLakituState.pos[i]) > 16.0f ||
+                       fabsf(focus[i] - gLakituState.focus[i]) > 16.0f;
+        }
+        changed |= abs((int)(s16)(gLakituState.yaw - yaw)) > 128;
+    }
+    if (eligible && changed) {
+        level = gCurrLevelNum; area = gCurrAreaIndex; model = current_model;
+        width = gfx_current_dimensions.width; height = gfx_current_dimensions.height;
+        gamepad = configWiiUGamePadDisplay; filtering = configFiltering;
+        for (unsigned i = 0; i < 3; ++i) {
+            player[i] = gMarioState->pos[i]; camera[i] = gLakituState.pos[i];
+            focus[i] = gLakituState.focus[i];
+        }
+        yaw = gLakituState.yaw;
+    }
+    anchor_valid = eligible;
+    uint64_t now = osGetTime();
+    unsigned previous_block = geometry_ab.block;
+    bool was_running = geometry_ab.running;
+    enum WiiUAbEvent event = wiiu_geometry_ab_step(&geometry_ab, now, eligible, changed);
+    if ((event == WIIU_AB_RESET && was_running) || event == WIIU_AB_NEXT || event == WIIU_AB_DONE) {
+        unsigned ended = previous_block + 1;
+        WHBLogPrintf("MODEL_AB revision=7 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
+            geometry_ab_run, ended, (ended & 1) ? "baseline" : "baseline", geometry_ab_frames,
+            geometry_ab_windows * 120, (unsigned)gfx_vcutm_profile.frames);
+        geometry_ab_frames = 0;
+        geometry_ab_windows = 0;
+        gfx_profile_ab_clear_window();
+    }
+    if (event == WIIU_AB_RESET) {
+        gfx_profile_ab_clear_window();
+        WHBLogPrintf("MODEL_AB revision=7 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
+    }
+    if (event == WIIU_AB_START || event == WIIU_AB_NEXT) {
+        if (event == WIIU_AB_START) ++geometry_ab_run;
+        gfx_profile_ab_clear_window();
+        geometry_ab_frames = 0;
+        WHBLogPrintf("MODEL_AB revision=7 experiment=baseline_profile event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
+            geometry_ab_run, geometry_ab.block + 1,
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "baseline" : "baseline",
+            level, area, model, width, height, (int)player[0], (int)player[1], (int)player[2],
+            (int)camera[0], (int)camera[1], (int)camera[2]);
+    }
+    if (event == WIIU_AB_DONE)
+        WHBLogPrintf("MODEL_AB revision=7 event=complete run=%u blocks=4", geometry_ab_run);
+    geometry_ab_measure = wiiu_geometry_ab_measure(&geometry_ab, now);
+}
+#endif
+
 static void gfx_flush(void) {
     if (buf_vbo_len > 0) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
         gfx_vcutm_profile.draw_calls++;
         gfx_vcutm_profile.triangles += (uint32_t) buf_vbo_num_tris;
+        const uint64_t submit_begin_us = osGetTime();
+        if (buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES)
+            ++model_geometry_profile.full_flushes;
 #endif
         gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        model_geometry_profile.submit_us += osGetTime() - submit_begin_us;
+#endif
         buf_vbo_len = 0;
         buf_vbo_num_tris = 0;
     }
@@ -1194,6 +1358,11 @@ static float gfx_adjust_x_for_aspect_ratio(float x) {
 }
 
 static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t vertex_begin_us = osGetTime();
+    model_geometry_profile.vertices += n_vertices;
+    ++model_geometry_profile.batches;
+#endif
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const Vtx_t *v = &vertices[i].v;
         const Vtx_tn *vn = &vertices[i].n;
@@ -1315,7 +1484,11 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             d->color.a = v->cn[3];
         }
     }
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    model_geometry_profile.vertex_us += osGetTime() - vertex_begin_us;
+#endif
 }
+
 
 static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     struct LoadedVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
@@ -2557,6 +2730,7 @@ uint16_t *get_framebuffer() {
 
 void gfx_start_frame(void) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    memset(&gfx_gx2_frame_profile, 0, sizeof(gfx_gx2_frame_profile));
     gfx_vcutm_profile.frame_begin_us = osGetTime();
     gfx_vcutm_profile.run_begin_us = 0;
     gfx_vcutm_profile.dl_begin_us = 0;
@@ -2564,6 +2738,13 @@ void gfx_start_frame(void) {
     gfx_vcutm_profile.run_end_us = 0;
     gfx_vcutm_profile.draw_calls = 0;
     gfx_vcutm_profile.triangles = 0;
+    model_geometry_profile.vertex_us = 0;
+    model_geometry_profile.submit_us = 0;
+    model_geometry_profile.vertices = 0;
+    model_geometry_profile.batches = 0;
+    model_geometry_profile.full_flushes = 0;
+    model_geometry_profile.material_prepares = 0;
+    model_geometry_profile.uniform_prepares = 0;
 #endif
     gfx_wapi->handle_events();
 #ifndef TARGET_N3DS
@@ -2607,10 +2788,32 @@ void gfx_run(Gfx *commands) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
 static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_end_us,
                                     uint64_t present_end_us) {
-    if (gCurrLevelNum != LEVEL_VCUTM || gfx_vcutm_profile.run_begin_us == 0) {
-        memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+    if (!geometry_ab_measure) {
+        gfx_profile_ab_clear_window();
         return;
     }
+    static int previous_level = -1;
+    static unsigned previous_model = ~0u;
+#ifdef DYNOS
+    const unsigned model = dynos_active_player_choice();
+#else
+    const unsigned model = 0;
+#endif
+    if (gCurrLevelNum != previous_level || model != previous_model) {
+        memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+        memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+        memset(model_phase_profile, 0, sizeof(model_phase_profile));
+        previous_level = gCurrLevelNum;
+        previous_model = model;
+        return;
+    }
+    if (gfx_vcutm_profile.run_begin_us == 0) {
+        memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+        memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+        memset(model_phase_profile, 0, sizeof(model_phase_profile));
+        return;
+    }
+    ++geometry_ab_frames;
 
     const uint64_t total_us = present_end_us - gfx_vcutm_profile.frame_begin_us;
     const uint64_t pre_submit_us = gfx_vcutm_profile.run_begin_us - gfx_vcutm_profile.frame_begin_us;
@@ -2622,8 +2825,51 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
     const uint64_t present_us = present_end_us - finish_end_us;
     const uint64_t interval_us = gfx_vcutm_profile.previous_present_us != 0
         ? present_end_us - gfx_vcutm_profile.previous_present_us : 0;
+    static uint64_t last_spike_log_us;
+    if (interval_us >= 33000 && present_end_us - last_spike_log_us >= 1000000) {
+        WHBLogPrintf("MODEL_SPIKE level=%d model=%u phase=%s interval_us=%llu total_us=%llu dl_us=%llu post_submit_us=%llu audio_us=%llu finish_us=%llu present_us=%llu draws=%u triangles=%u",
+                     (int) gCurrLevelNum, model, gfx_profile_interpolated ? "interpolated" : "current", (unsigned long long) interval_us,
+                     (unsigned long long) total_us, (unsigned long long) dl_us,
+                     (unsigned long long) post_submit_us, (unsigned long long) audio_us,
+                     (unsigned long long) finish_us, (unsigned long long) present_us,
+                     (unsigned) gfx_vcutm_profile.draw_calls,
+                     (unsigned) gfx_vcutm_profile.triangles);
+        last_spike_log_us = present_end_us;
+    }
+    if (gfx_vcutm_profile.previous_present_us != 0) ++gfx_vcutm_profile.interval_count;
     gfx_vcutm_profile.previous_present_us = present_end_us;
+    struct ModelPhaseProfile *phase = &model_phase_profile[gfx_profile_interpolated ? 1 : 0];
+    ++phase->frames;
+    if (interval_us >= 25000) ++phase->slow_intervals;
+    phase->total_us += total_us;
+    phase->pre_us += pre_submit_us;
+    phase->dl_us += dl_us;
+    phase->vertex_us += model_geometry_profile.vertex_us;
+    phase->submit_us += model_geometry_profile.submit_us;
+    phase->audio_us += audio_us;
+    phase->post_us += post_submit_us;
+    phase->finish_us += finish_us;
+    phase->present_us += present_us;
+    if (total_us > phase->max_total_us) phase->max_total_us = total_us;
+    if (finish_us > phase->max_finish_us) phase->max_finish_us = finish_us;
+    phase->draws += gfx_vcutm_profile.draw_calls;
+    phase->triangles += gfx_vcutm_profile.triangles;
+    for (unsigned i = 0; i < WIIU_GX2_PROFILE_COUNT; ++i)
+        phase->backend.ticks[i] += gfx_gx2_frame_profile.ticks[i];
+    phase->backend.vbo_bytes += gfx_gx2_frame_profile.vbo_bytes;
+    phase->backend.allocations += gfx_gx2_frame_profile.allocations;
+    phase->backend.draw_calls += gfx_gx2_frame_profile.draw_calls;
+    phase->backend.vsync_waits += gfx_gx2_frame_profile.vsync_waits;
+    phase->backend.direct_draws += gfx_gx2_frame_profile.direct_draws;
+    phase->backend.copied_draws += gfx_gx2_frame_profile.copied_draws;
     gfx_vcutm_profile.frames++;
+    model_geometry_profile.vertex_sum_us += model_geometry_profile.vertex_us;
+    model_geometry_profile.submit_sum_us += model_geometry_profile.submit_us;
+    model_geometry_profile.vertices_sum += model_geometry_profile.vertices;
+    model_geometry_profile.batches_sum += model_geometry_profile.batches;
+    model_geometry_profile.full_flushes_sum += model_geometry_profile.full_flushes;
+    model_geometry_profile.material_prepares_sum += model_geometry_profile.material_prepares;
+    model_geometry_profile.uniform_prepares_sum += model_geometry_profile.uniform_prepares;
     gfx_vcutm_profile.interval_sum_us += interval_us;
     gfx_vcutm_profile.total_sum_us += total_us;
     gfx_vcutm_profile.pre_submit_sum_us += pre_submit_us;
@@ -2663,9 +2909,23 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
 
     if (gfx_vcutm_profile.frames == 120) {
         const uint64_t fps_x1000 = gfx_vcutm_profile.interval_sum_us != 0
-            ? (uint64_t) 119 * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
+            ? (uint64_t) gfx_vcutm_profile.interval_count * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
         gfx_vcutm_window_sequence++;
-        WHBLogPrintf("LOADTIME_VCUTM_TIMING window=%u frames=120 fps_x1000=%llu avg_total_us=%llu max_total_us=%llu avg_pre_submit_us=%llu max_pre_submit_us=%llu avg_setup_us=%llu max_setup_us=%llu avg_dl_us=%llu max_dl_us=%llu avg_post_submit_us=%llu max_post_submit_us=%llu avg_audio_us=%llu max_audio_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu max_present_us=%llu",
+        ++geometry_ab_windows;
+        WHBLogPrintf("MODEL_AB_WINDOW revision=7 experiment=baseline_profile window=%u run=%u block=%u method=%s",
+            (unsigned)gfx_vcutm_window_sequence, geometry_ab_run, geometry_ab.block + 1,
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "baseline" : "baseline");
+        WHBLogPrintf("MODEL_GEOMETRY revision=7 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
+                     (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
+                     (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
+                     (unsigned long long) (model_geometry_profile.submit_sum_us / 120),
+                     (unsigned long long) (model_geometry_profile.vertices_sum / 120),
+                     (unsigned long long) (model_geometry_profile.batches_sum / 120),
+                     (unsigned long long) (model_geometry_profile.full_flushes_sum / 120),
+                     (unsigned long long) (model_geometry_profile.material_prepares_sum / 120),
+                     (unsigned long long) (model_geometry_profile.uniform_prepares_sum / 120));
+        WHBLogPrintf("MODEL_PROFILE level=%d model=%u window=%u frames=120 fps_x1000=%llu avg_total_us=%llu max_total_us=%llu avg_pre_submit_us=%llu max_pre_submit_us=%llu avg_setup_us=%llu max_setup_us=%llu avg_dl_us=%llu max_dl_us=%llu avg_post_submit_us=%llu max_post_submit_us=%llu avg_audio_us=%llu max_audio_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu max_present_us=%llu",
+                     (int) gCurrLevelNum, model,
                      (unsigned) gfx_vcutm_window_sequence,
                      (unsigned long long) fps_x1000,
                      (unsigned long long) (gfx_vcutm_profile.total_sum_us / 120),
@@ -2704,8 +2964,11 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
                      (int) gfx_vcutm_profile.worst_focus_z,
                      (int) gfx_vcutm_profile.worst_camera_yaw);
         const uint64_t previous_present_us = gfx_vcutm_profile.previous_present_us;
+        gfx_profile_report_phases((unsigned)gfx_vcutm_window_sequence, (int)gCurrLevelNum, model);
         memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
         gfx_vcutm_profile.previous_present_us = previous_present_us;
+        memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+        memset(model_phase_profile, 0, sizeof(model_phase_profile));
     }
 }
 #endif
