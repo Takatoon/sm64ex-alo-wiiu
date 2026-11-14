@@ -23,13 +23,16 @@ de los registros incluso al estar cerca del límite de pantalla.
 La corrección de `kill_enable` ya está en la base publicada; se conserva y no
 se presenta como una optimización nueva de esta rama.
 
-## Prueba actual: colores compactos
+## Prueba actual: selector manual de color
 
-- Registros: `revision=8`, `experiment=packed_colors`.
-- Cuatro bloques de 20 segundos: `float_colors`, `rgba8`, `float_colors`, `rgba8`.
+- Registros: `revision=9`, `control=manual`.
+- El HUD de TV muestra **F** para Float o **R** para RGBA8, debajo del lugar del contador de FPS. Se muestra aunque el contador esté desactivado.
+- Una pulsación corta de **−** cambia de formato al soltar el botón. El cambio se aplica al inicio del siguiente par de imágenes, sin alterar una imagen pendiente.
+- Empieza en **R**. La selección se conserva al moverse y cambiar de escena; no hay temporizador ni espera de 90 segundos para comparar el aspecto.
+- **− + izquierda/derecha** conserva el atajo de modelos de DynOS y no cambia el formato de color.
+- La alternancia automática de las pruebas anteriores queda desactivada por defecto; puede recuperarse al compilar con `WIIU_GEOMETRY_AUTO_AB` definido.
 - En ambos casos se conservan la escritura directa y las constantes preparadas.
-- Se excluye el primer segundo de cada bloque. Se espera a que la escena se
-  estabilice y se descartan comparaciones interrumpidas por cambios de cámara.
+- Los tiempos del perfilado se separan al cambiar manualmente de formato. Una comparación de rendimiento manual requiere mantener la misma vista; para buscar fallos visuales se puede jugar y mover la cámara libremente.
 - Mario permanece despierto en la compilación de pruebas.
 - Posiciones y UV siguen en float. Cada campo de color pasa de 16 a 4 bytes;
   la reducción del vértice completo depende de cuántos atributos use el shader.

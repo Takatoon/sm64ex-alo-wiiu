@@ -23,6 +23,9 @@
 
 #if defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
 #include <whb/log.h>
+#ifdef EXTERNAL_DATA
+#include "pc/gfx/gfx_pc.h"
+#endif
 #endif
 
 #ifdef TARGET_N64
@@ -94,6 +97,12 @@ static bool draw_fps_counter(OSTime *lastTime, s16 *drawnValue) {
 }
 
 static void display_fps_counter(void) {
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+#ifdef EXT_OPTIONS_MENU
+    if (!optmenu_open)
+#endif
+        print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 164, gfx_profile_color_indicator());
+#endif
     if (!configShowFPS) {
         sFPSLastTime = 0;
 #ifdef TARGET_WII_U
@@ -116,12 +125,22 @@ static void display_fps_counter(void) {
 
 #ifdef TARGET_WII_U
 void display_menu_fps_counter(void) {
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+    // Emit after the cached-background boundary, just like the live FPS.
+    print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 164, gfx_profile_color_indicator());
+#endif
     if (!configShowFPS) {
         sMenuFPSLastTime = 0;
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+        render_text_labels();
+#endif
         return;
     }
     s16 fpsValue = 0;
     if (!draw_fps_counter(&sMenuFPSLastTime, &fpsValue)) {
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+        render_text_labels();
+#endif
         return;
     }
     // The normal label pass already ran, so consume this label immediately to

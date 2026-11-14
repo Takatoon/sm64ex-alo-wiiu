@@ -17,6 +17,21 @@
 #include "../wiiu_gamepad_hud.h"
 #endif
 #include "../configfile.h"
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+#include "../gfx/gfx_pc.h"
+#include "../gfx/wiiu_color_input.h"
+static unsigned color_keys[2];
+static bool color_connected[2];
+static struct WiiUColorButton color_button[2];
+#define COLOR_INPUT(device,buttons,prefix) do { \
+    color_connected[device]=true; \
+    color_keys[device]=((buttons & prefix##MINUS)?WIIU_COLOR_MINUS:0) \
+        |((buttons & prefix##LEFT)?WIIU_COLOR_LEFT:0) \
+        |((buttons & prefix##RIGHT)?WIIU_COLOR_RIGHT:0); \
+} while(0)
+#else
+#define COLOR_INPUT(device,buttons,prefix) ((void)0)
+#endif
 #ifdef DYNOS
 #include "../dynos/dynos.h"
 #include "../dynos/dynos_shortcut.h"
@@ -86,6 +101,7 @@ static void read_vpad(OSContPad *pad) {
     wiiu_gamepad_set_touch(status.tpNormal.touched != 0);
 #endif
     v = status.hold;
+    COLOR_INPUT(0,v,VPAD_BUTTON_);
 #ifdef DYNOS
     DYNOS_INPUT(0,v,VPAD_BUTTON_);
 #endif
@@ -156,6 +172,7 @@ static void read_wpad(OSContPad* pad) {
     bool gamepadRightStickNotSet = pad->ext_stick_x == 0 && pad->ext_stick_y == 0;
 
     if (status.extensionType == WPAD_EXT_NUNCHUK || status.extensionType == WPAD_EXT_MPLUS_NUNCHUK) {
+        COLOR_INPUT(1,wm,WPAD_BUTTON_);
 #ifdef DYNOS
         DYNOS_INPUT(1,wm,WPAD_BUTTON_);
 #endif
@@ -170,13 +187,14 @@ static void read_wpad(OSContPad* pad) {
         if (wm & WPAD_BUTTON_DOWN) { pad->button |= D_CBUTTONS; rStick.y -= 1.0; }
         if (wm & WPAD_BUTTON_LEFT) { pad->button |= L_CBUTTONS; rStick.x -= 1.0; }
         if (wm & WPAD_BUTTON_RIGHT) { pad->button |= R_CBUTTONS; rStick.x += 1.0; }
-#ifndef DYNOS
+#if !defined(DYNOS) && !(defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE))
         if (wm & WPAD_BUTTON_MINUS) pad->button |= L_TRIG;
 #endif
         if (ext & WPAD_NUNCHUK_BUTTON_C) pad->button |= R_TRIG;
         if (ext & WPAD_NUNCHUK_BUTTON_Z) pad->button |= Z_TRIG;
     } else if (status.extensionType == WPAD_EXT_CLASSIC || status.extensionType == WPAD_EXT_MPLUS_CLASSIC) {
         uint32_t ext = status.classic.hold;
+        COLOR_INPUT(1,ext,WPAD_CLASSIC_BUTTON_);
 #ifdef DYNOS
         DYNOS_INPUT(1,ext,WPAD_CLASSIC_BUTTON_);
 #endif
@@ -193,6 +211,7 @@ static void read_wpad(OSContPad* pad) {
         if (ext & WPAD_CLASSIC_BUTTON_UP) pad->button |= U_JPAD;
     } else if (status.extensionType == WPAD_EXT_PRO_CONTROLLER) {
         uint32_t ext = status.pro.hold;
+        COLOR_INPUT(1,ext,WPAD_PRO_BUTTON_);
 #ifdef DYNOS
         DYNOS_INPUT(1,ext,WPAD_PRO_BUTTON_);
 #endif
@@ -230,6 +249,10 @@ static void read_wpad(OSContPad* pad) {
 }
 
 static void controller_wiiu_read(OSContPad* pad) {
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+    color_keys[0]=color_keys[1]=0;
+    color_connected[0]=color_connected[1]=false;
+#endif
 #ifdef DYNOS
     dynos_keys[0]=dynos_keys[1]=0;
 #endif
@@ -241,6 +264,12 @@ static void controller_wiiu_read(OSContPad* pad) {
 
     read_vpad(pad);
     read_wpad(pad);
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+    bool toggle=false;
+    for (unsigned device=0;device<2;device++)
+        toggle |= wiiu_color_button_step(&color_button[device], color_keys[device], color_connected[device]);
+    if (toggle) gfx_profile_toggle_colors();
+#endif
 #ifdef DYNOS
     for(unsigned device=0;device<2;device++) {
         int step=dynos_shortcut_step(dynos_previous[device],dynos_keys[device]);

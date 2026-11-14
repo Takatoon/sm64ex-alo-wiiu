@@ -405,6 +405,14 @@ static bool gfx_profile_interpolated;
 static struct WiiUGeometryAb geometry_ab;
 static bool geometry_ab_measure;
 static unsigned geometry_ab_run, geometry_ab_frames, geometry_ab_windows;
+static bool geometry_manual_packed = true;
+static bool geometry_manual_toggle;
+void gfx_profile_toggle_colors(void) {
+    geometry_manual_toggle = !geometry_manual_toggle;
+}
+const char *gfx_profile_color_indicator(void) {
+    return gfx_gx2_packed_colors() ? "R" : "F";
+}
 static void gfx_profile_ab_update(void);
 bool gfx_profile_ab_keep_awake(void) {
     // Also hold idle during stabilization and after completion, so sleeping
@@ -440,7 +448,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
         if (p->frames == 0) continue;
         const char *phase = i ? "interpolated" : "current";
 #define PHASE_AVG(field) (unsigned long long)(p->field / p->frames)
-        WHBLogPrintf("MODEL_PHASE revision=8 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
+        WHBLogPrintf("MODEL_PHASE revision=9 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
             window, level, model, phase, p->frames, p->slow_intervals,
             PHASE_AVG(total_us), (unsigned long long)p->max_total_us,
             PHASE_AVG(pre_us), PHASE_AVG(dl_us), PHASE_AVG(vertex_us),
@@ -449,7 +457,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
             PHASE_AVG(present_us), PHASE_AVG(draws), PHASE_AVG(triangles));
 #undef PHASE_AVG
 #define BACKEND_AVG(metric) gfx_profile_avg_ticks(p->backend.ticks[WIIU_GX2_##metric], p->frames)
-        WHBLogPrintf("MODEL_GX2 revision=8 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u",
+        WHBLogPrintf("MODEL_GX2 revision=9 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u",
             window, phase, p->frames,
             BACKEND_AVG(VALIDATE), BACKEND_AVG(STORAGE), BACKEND_AVG(COPY),
             BACKEND_AVG(PUBLISH), BACKEND_AVG(DRAW), BACKEND_AVG(BOUNDARY),
@@ -470,6 +478,23 @@ static void gfx_profile_ab_clear_window(void) {
 }
 
 static void gfx_profile_ab_update(void) {
+#ifndef WIIU_GEOMETRY_AUTO_AB
+    static bool announced;
+    if (geometry_manual_toggle || !announced) {
+        if (geometry_manual_toggle) geometry_manual_packed = !geometry_manual_packed;
+        geometry_manual_toggle = false;
+        gfx_profile_ab_clear_window();
+        WHBLogPrintf("MODEL_COLOR revision=9 control=manual event=select method=%s indicator=%s",
+            geometry_manual_packed ? "rgba8" : "float_colors", geometry_manual_packed ? "R" : "F");
+        announced = true;
+    }
+    // Apply only before the first image of a pair. Controller events merely
+    // queue the change, so no pending display list sees its layout switched.
+    gfx_gx2_set_packed_colors(geometry_manual_packed);
+    geometry_ab_measure = true;
+    geometry_ab.initialized = gCurrentArea != NULL && gMarioState != NULL;
+    return;
+#else
     static bool anchor_valid;
     static int level, area;
     static unsigned model, width, height, gamepad, filtering;
@@ -515,7 +540,7 @@ static void gfx_profile_ab_update(void) {
     enum WiiUAbEvent event = wiiu_geometry_ab_step(&geometry_ab, now, eligible, changed);
     if ((event == WIIU_AB_RESET && was_running) || event == WIIU_AB_NEXT || event == WIIU_AB_DONE) {
         unsigned ended = previous_block + 1;
-        WHBLogPrintf("MODEL_AB revision=8 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
+        WHBLogPrintf("MODEL_AB revision=9 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
             geometry_ab_run, ended, (ended & 1) ? "float_colors" : "rgba8", geometry_ab_frames,
             geometry_ab_windows * 120, (unsigned)gfx_vcutm_profile.frames);
         geometry_ab_frames = 0;
@@ -524,24 +549,25 @@ static void gfx_profile_ab_update(void) {
     }
     if (event == WIIU_AB_RESET) {
         gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_AB revision=8 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
+        WHBLogPrintf("MODEL_AB revision=9 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
     }
     if (event == WIIU_AB_START || event == WIIU_AB_NEXT) {
         if (event == WIIU_AB_START) ++geometry_ab_run;
         gfx_profile_ab_clear_window();
         geometry_ab_frames = 0;
-        WHBLogPrintf("MODEL_AB revision=8 experiment=packed_colors event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
+        WHBLogPrintf("MODEL_AB revision=9 experiment=packed_colors event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
             geometry_ab_run, geometry_ab.block + 1,
             wiiu_geometry_ab_alternate(&geometry_ab) ? "rgba8" : "float_colors",
             level, area, model, width, height, (int)player[0], (int)player[1], (int)player[2],
             (int)camera[0], (int)camera[1], (int)camera[2]);
     }
     if (event == WIIU_AB_DONE)
-        WHBLogPrintf("MODEL_AB revision=8 event=complete run=%u blocks=4", geometry_ab_run);
+        WHBLogPrintf("MODEL_AB revision=9 event=complete run=%u blocks=4", geometry_ab_run);
     geometry_ab_measure = wiiu_geometry_ab_measure(&geometry_ab, now);
     // Previous pair has completed; select a matching immutable fetch program
     // before either image of the next pair is submitted.
     gfx_gx2_set_packed_colors(wiiu_geometry_ab_alternate(&geometry_ab));
+#endif
 }
 #endif
 
@@ -2971,10 +2997,15 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
             ? (uint64_t) gfx_vcutm_profile.interval_count * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
         gfx_vcutm_window_sequence++;
         ++geometry_ab_windows;
-        WHBLogPrintf("MODEL_AB_WINDOW revision=8 experiment=packed_colors window=%u run=%u block=%u method=%s",
+#ifdef WIIU_GEOMETRY_AUTO_AB
+        WHBLogPrintf("MODEL_AB_WINDOW revision=9 experiment=packed_colors window=%u run=%u block=%u method=%s",
             (unsigned)gfx_vcutm_window_sequence, geometry_ab_run, geometry_ab.block + 1,
             wiiu_geometry_ab_alternate(&geometry_ab) ? "rgba8" : "float_colors");
-        WHBLogPrintf("MODEL_GEOMETRY revision=8 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
+#else
+        WHBLogPrintf("MODEL_COLOR_WINDOW revision=9 control=manual window=%u method=%s",
+            (unsigned)gfx_vcutm_window_sequence, gfx_gx2_packed_colors() ? "rgba8" : "float_colors");
+#endif
+        WHBLogPrintf("MODEL_GEOMETRY revision=9 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
                      (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
                      (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
                      (unsigned long long) (model_geometry_profile.submit_sum_us / 120),

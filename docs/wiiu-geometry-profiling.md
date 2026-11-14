@@ -576,3 +576,31 @@ the slower view remains around 9 ms; do not interpret its duration as isolated
 GPU time. The tested slower view improves substantially but is not locked to
 60 FPS. Further scene/model/transparency/fog visual checks remain appropriate
 before making compact colors the non-profile default.
+
+## Manual visual comparison controls
+
+Revision **9** defaults to manual control in the timing-profile build. The TV
+HUD displays F (float) or R (RGBA8), regardless of the FPS setting. The options
+menu redraws this marker after the cached-background boundary, including when
+the FPS counter is disabled or still initializing its first timing sample.
+
+Tap/release Minus to toggle; holding it does not repeat. Minus plus left/right
+remains the DynOS model shortcut and suppresses the color toggle. Physical
+input is collected before DynOS consumes the D-pad chord on GamePad, Pro,
+Classic and Wii Remote/Nunchuk. Missing/disconnected devices do not synthesize
+a release toggle. Simultaneous device toggles are merged into one action.
+
+Controller events queue the request, which is applied at the next completed
+simulation/render-pair boundary. The HUD reports the applied backend format,
+not a pending request. Start in RGBA8; retain the selection across scene/menu
+changes. There is no automatic restart or timeout. `MODEL_COLOR` records each
+selection and `MODEL_COLOR_WINDOW` identifies collected measurement windows;
+changing format clears accumulated samples so methods are not mixed.
+
+The previous automated protocol is retained behind the explicit compile-time
+`WIIU_GEOMETRY_AUTO_AB` define. No such define is used for this visual-test WUHB.
+The standalone manual-control tests exercise actual selector functions, held
+keys/chords/disconnects, no timer-driven changes and pair-boundary application.
+Actual overlay functions are tested with FPS disabled, a warmup FPS sample and
+the cached options background. Geometry equivalence and cache rollover checks
+also pass. The native Wii U build compiles and packages with the same filename.
