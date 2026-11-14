@@ -2,6 +2,15 @@
  * shared; GFX_PREPARED_MATERIAL reuses normalized material constants.
  * Uses gfx_sp_tri1 locals; no include guard. */
 #ifdef GFX_PREPARED_MATERIAL
+#ifdef GFX_PACKED_COLORS
+    uint8_t packed_lod = 0;
+    if (triangle_state.needs_lod) {
+        float distance_frac = (v1->w - 3000.0f) / 3000.0f;
+        if (distance_frac < 0.0f) distance_frac = 0.0f;
+        if (distance_frac > 1.0f) distance_frac = 1.0f;
+        packed_lod = distance_frac * 255.0f;
+    }
+#else
     float prepared_lod = 0.0f;
     if (triangle_state.needs_lod) {
         float distance_frac = (v1->w - 3000.0f) / 3000.0f;
@@ -11,6 +20,7 @@
         uint8_t lod = distance_frac * 255.0f;
         prepared_lod = lod / 255.0f;
     }
+#endif
 #endif
     for (int i = 0; i < 3; i++) {
         float z = v_arr[i]->z, w = v_arr[i]->w;
@@ -45,6 +55,9 @@
         }
 #ifndef TARGET_N3DS
         if (use_fog) {
+#ifdef GFX_PACKED_COLORS
+            EMIT_RGBA(rdp.fog_color.r, rdp.fog_color.g, rdp.fog_color.b, v_arr[i]->color.a);
+#else
 #ifdef GFX_PREPARED_MATERIAL
             EMIT_FLOAT(triangle_state.fog_rgb[0]);
             EMIT_FLOAT(triangle_state.fog_rgb[1]);
@@ -55,9 +68,24 @@
             EMIT_FLOAT(rdp.fog_color.b / 255.0f);
 #endif
             EMIT_FLOAT(v_arr[i]->color.a / 255.0f); // fog factor (not alpha)
+#endif
         }
 #endif
         for (int j = 0; j < num_inputs; j++) {
+#ifdef GFX_PACKED_COLORS
+            static const struct RGBA zero = {0,0,0,0};
+            const struct RGBA lod_color = {packed_lod,packed_lod,packed_lod,packed_lod};
+            uint8_t rgb = triangle_state.rgb_kind[j];
+            const struct RGBA *color = rgb == CC_SHADE ? &v_arr[i]->color :
+                rgb == CC_PRIM ? &rdp.prim_color : rgb == CC_ENV ? &rdp.env_color :
+                rgb == CC_LOD ? &lod_color : &zero;
+            uint8_t alpha = triangle_state.alpha_kind[j];
+            uint8_t a = !use_alpha ? 255 : alpha == CC_SHADE ?
+                (use_fog ? 255 : v_arr[i]->color.a) :
+                alpha == CC_PRIM ? rdp.prim_color.a : alpha == CC_ENV ? rdp.env_color.a :
+                alpha == CC_LOD ? packed_lod : 0;
+            EMIT_RGBA(color->r, color->g, color->b, a);
+#else
 #ifdef GFX_PREPARED_MATERIAL
             uint8_t rgb = triangle_state.rgb_kind[j];
             if (rgb == CC_SHADE) {
@@ -131,6 +159,7 @@
                     }
                 }
             }
+#endif
 #endif
         }
     }

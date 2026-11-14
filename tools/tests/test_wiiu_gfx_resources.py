@@ -39,6 +39,9 @@ CACHE = r'''
 #include "src/pc/gfx/gfx_pc.c"
 #include "src/pc/gfx/gfx_cc.c"
 unsigned int configFiltering;
+struct GfxRenderingAPI gfx_gx2_api;
+float *gfx_gx2_reserve_vertices(size_t capacity) { (void)capacity; return NULL; }
+bool gfx_gx2_packed_colors(void) { return false; }
 void sys_fatal(const char *fmt, ...) { (void)fmt; abort(); }
 static unsigned ids, resets, draws;
 static uint32_t selected[2];

@@ -58,6 +58,9 @@
 #ifdef TARGET_N3DS
 #include "gfx_3ds.h"
 #endif
+#ifdef TARGET_WII_U
+#include "wiiu_vertex_format.h"
+#endif
 
 #include "../platform.h"
 #include "../configfile.h"
@@ -437,7 +440,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
         if (p->frames == 0) continue;
         const char *phase = i ? "interpolated" : "current";
 #define PHASE_AVG(field) (unsigned long long)(p->field / p->frames)
-        WHBLogPrintf("MODEL_PHASE revision=7 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
+        WHBLogPrintf("MODEL_PHASE revision=8 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
             window, level, model, phase, p->frames, p->slow_intervals,
             PHASE_AVG(total_us), (unsigned long long)p->max_total_us,
             PHASE_AVG(pre_us), PHASE_AVG(dl_us), PHASE_AVG(vertex_us),
@@ -446,7 +449,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
             PHASE_AVG(present_us), PHASE_AVG(draws), PHASE_AVG(triangles));
 #undef PHASE_AVG
 #define BACKEND_AVG(metric) gfx_profile_avg_ticks(p->backend.ticks[WIIU_GX2_##metric], p->frames)
-        WHBLogPrintf("MODEL_GX2 revision=7 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u",
+        WHBLogPrintf("MODEL_GX2 revision=8 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u",
             window, phase, p->frames,
             BACKEND_AVG(VALIDATE), BACKEND_AVG(STORAGE), BACKEND_AVG(COPY),
             BACKEND_AVG(PUBLISH), BACKEND_AVG(DRAW), BACKEND_AVG(BOUNDARY),
@@ -512,8 +515,8 @@ static void gfx_profile_ab_update(void) {
     enum WiiUAbEvent event = wiiu_geometry_ab_step(&geometry_ab, now, eligible, changed);
     if ((event == WIIU_AB_RESET && was_running) || event == WIIU_AB_NEXT || event == WIIU_AB_DONE) {
         unsigned ended = previous_block + 1;
-        WHBLogPrintf("MODEL_AB revision=7 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
-            geometry_ab_run, ended, (ended & 1) ? "baseline" : "prepared_material", geometry_ab_frames,
+        WHBLogPrintf("MODEL_AB revision=8 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
+            geometry_ab_run, ended, (ended & 1) ? "float_colors" : "rgba8", geometry_ab_frames,
             geometry_ab_windows * 120, (unsigned)gfx_vcutm_profile.frames);
         geometry_ab_frames = 0;
         geometry_ab_windows = 0;
@@ -521,21 +524,24 @@ static void gfx_profile_ab_update(void) {
     }
     if (event == WIIU_AB_RESET) {
         gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_AB revision=7 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
+        WHBLogPrintf("MODEL_AB revision=8 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
     }
     if (event == WIIU_AB_START || event == WIIU_AB_NEXT) {
         if (event == WIIU_AB_START) ++geometry_ab_run;
         gfx_profile_ab_clear_window();
         geometry_ab_frames = 0;
-        WHBLogPrintf("MODEL_AB revision=7 experiment=prepared_material event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
+        WHBLogPrintf("MODEL_AB revision=8 experiment=packed_colors event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
             geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "prepared_material" : "baseline",
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "rgba8" : "float_colors",
             level, area, model, width, height, (int)player[0], (int)player[1], (int)player[2],
             (int)camera[0], (int)camera[1], (int)camera[2]);
     }
     if (event == WIIU_AB_DONE)
-        WHBLogPrintf("MODEL_AB revision=7 event=complete run=%u blocks=4", geometry_ab_run);
+        WHBLogPrintf("MODEL_AB revision=8 event=complete run=%u blocks=4", geometry_ab_run);
     geometry_ab_measure = wiiu_geometry_ab_measure(&geometry_ab, now);
+    // Previous pair has completed; select a matching immutable fetch program
+    // before either image of the next pair is submitted.
+    gfx_gx2_set_packed_colors(wiiu_geometry_ab_alternate(&geometry_ab));
 }
 #endif
 
@@ -1727,24 +1733,31 @@ retry_texture_bindings:;
     }
 #endif
 #ifdef TARGET_WII_U
-    bool use_prepared_material = true;
-#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
-    use_prepared_material = wiiu_geometry_ab_alternate(&geometry_ab);
-#endif
-    if (use_prepared_material) {
-        if (!triangle_state.attributes_valid)
-            gfx_prepare_material_values(comb, num_inputs, use_alpha, use_fog);
+    if (!triangle_state.attributes_valid)
+        gfx_prepare_material_values(comb, num_inputs, use_alpha, use_fog);
+    bool use_packed_colors = gfx_rapi == &gfx_gx2_api && gfx_gx2_packed_colors();
+    if (use_packed_colors) {
 #define GFX_PREPARED_MATERIAL
+#define GFX_PACKED_COLORS
 #define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#define EMIT_RGBA(r,g,b,a) wiiu_vertex_store_rgba8(&buf_vbo[buf_vbo_len++], (r), (g), (b), (a))
 #include "gfx_triangle_emit.inc.h"
+#undef EMIT_RGBA
 #undef EMIT_FLOAT
+#undef GFX_PACKED_COLORS
 #undef GFX_PREPARED_MATERIAL
     } else
 #endif
     {
+#ifdef TARGET_WII_U
+#define GFX_PREPARED_MATERIAL
+#endif
 #define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
 #include "gfx_triangle_emit.inc.h"
 #undef EMIT_FLOAT
+#ifdef GFX_PREPARED_MATERIAL
+#undef GFX_PREPARED_MATERIAL
+#endif
     }
     if (++buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES) {
         gfx_flush();
@@ -2790,6 +2803,14 @@ void gfx_start_frame(void) {
 void gfx_run(Gfx *commands) {
 #ifdef TARGET_WII_U
     triangle_state.valid = false;
+    static bool previous_packed_colors;
+    bool packed = gfx_gx2_packed_colors();
+    if (packed != previous_packed_colors) {
+        // Bind the matching fetch shader through the usual material path,
+        // after start_frame has acquired a valid foreground GPU context.
+        rendering_state.shader_program = NULL;
+        previous_packed_colors = packed;
+    }
 #endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     gfx_vcutm_profile.run_begin_us = osGetTime();
@@ -2950,10 +2971,10 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
             ? (uint64_t) gfx_vcutm_profile.interval_count * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
         gfx_vcutm_window_sequence++;
         ++geometry_ab_windows;
-        WHBLogPrintf("MODEL_AB_WINDOW revision=7 experiment=prepared_material window=%u run=%u block=%u method=%s",
+        WHBLogPrintf("MODEL_AB_WINDOW revision=8 experiment=packed_colors window=%u run=%u block=%u method=%s",
             (unsigned)gfx_vcutm_window_sequence, geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "prepared_material" : "baseline");
-        WHBLogPrintf("MODEL_GEOMETRY revision=7 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "rgba8" : "float_colors");
+        WHBLogPrintf("MODEL_GEOMETRY revision=8 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
                      (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
                      (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
                      (unsigned long long) (model_geometry_profile.submit_sum_us / 120),

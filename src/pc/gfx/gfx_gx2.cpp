@@ -61,6 +61,9 @@ static struct ShaderProgram shader_program_pool[64];
 static uint8_t shader_program_pool_size = 0;
 
 static struct ShaderProgram* current_shader_program = nullptr;
+static bool packed_colors;
+
+extern "C" bool gfx_gx2_packed_colors(void) { return packed_colors; }
 
 struct VboBlock
 {
@@ -185,11 +188,16 @@ static void gfx_gx2_load_shader(struct ShaderProgram* new_prg)
     if (!new_prg)
         return;
 
-    GX2SetFetchShader(&new_prg->group.fetchShader);
+    GX2SetFetchShader(packed_colors ? &new_prg->group.packedFetchShader : &new_prg->group.fetchShader);
     GX2SetVertexShader(&new_prg->group.vertexShader);
     GX2SetPixelShader(&new_prg->group.pixelShader);
 
     gfx_gx2_set_uniforms(new_prg);
+}
+
+extern "C" void gfx_gx2_set_packed_colors(bool enabled)
+{
+    packed_colors = enabled;
 }
 
 static struct ShaderProgram* gfx_gx2_create_and_load_new_shader(uint32_t shader_id)
@@ -523,12 +531,15 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     if (!current_shader_program)
         return;
 
+    const size_t stride = packed_colors
+        ? current_shader_program->group.packedVertexStride / sizeof(float)
+        : current_shader_program->num_floats;
+
 #ifdef WIIU_LOAD_TIMING_PROFILE
     const OSTime validation_begin = OSGetTime();
     // Distinguish corrupt CPU geometry from visibility/cache issues on GX2.
     // Large finite clip coordinates can be valid: do not impose a size cutoff.
     static unsigned int invalid_batches = 0;
-    const size_t stride = current_shader_program->num_floats;
     bool valid = stride >= 4 && buf_vbo_len % stride == 0 &&
                  buf_vbo_len / stride == buf_vbo_num_tris * 3;
     size_t bad_vertex = 0;
@@ -598,7 +609,7 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     const OSTime draw_begin = OSGetTime();
     gfx_gx2_frame_profile.ticks[WIIU_GX2_PUBLISH] += draw_begin - publish_begin;
 #endif
-    GX2SetAttribBuffer(0, vbo_len, sizeof(float) * current_shader_program->num_floats, new_vbo);
+    GX2SetAttribBuffer(0, vbo_len, sizeof(float) * stride, new_vbo);
     GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
 #ifdef WIIU_LOAD_TIMING_PROFILE
     gfx_gx2_frame_profile.ticks[WIIU_GX2_DRAW] += OSGetTime() - draw_begin;

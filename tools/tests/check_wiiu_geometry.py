@@ -41,6 +41,7 @@ PRELUDE = r'''
 #include "pc/gfx/gfx_pc.h"
 #include "pc/gfx/gfx_cc.h"
 #include "pc/gfx/gfx_rendering_api.h"
+#include "pc/gfx/wiiu_vertex_format.h"
 #define MAX_LIGHTS 2
 #define MAX_VERTICES 64
 #define SCREEN_WIDTH 320
@@ -54,12 +55,19 @@ static unsigned shader_queries;
 static unsigned configFiltering=1;
 static unsigned reserve_calls;
 static bool direct_fails;
+static bool packed_mode, packed_batch, batch_texture, batch_fog;
+static unsigned batch_inputs;
+static unsigned texture_mask, input_count;
+static bool gfx_gx2_packed_colors(void) { return packed_mode; }
 static float direct_buffer[VERTEX_BUFFER_SIZE];
 static float *gfx_gx2_reserve_vertices(size_t n) {
     assert(n <= VERTEX_BUFFER_SIZE); ++reserve_calls;
+    packed_batch=packed_mode;
+    batch_texture=texture_mask!=0;
+    batch_fog=(rdp.other_mode_l>>30)==G_BL_CLR_FOG;
+    batch_inputs=input_count;
     return direct_fails ? NULL : direct_buffer;
 }
-static unsigned texture_mask, input_count;
 static bool zero_to_one;
 static struct ColorCombiner test_comb;
 static struct TextureHashmapNode textures[2];
@@ -87,7 +95,10 @@ static struct GfxRenderingAPI api = {
 };
 #define gfx_gx2_api api
 static struct ColorCombiner *gfx_lookup_or_create_color_combiner(uint32_t id) {
-    test_comb.cc_id=id; return &test_comb;
+    static unsigned programs[16];
+    test_comb.cc_id=id;
+    test_comb.prg=(struct ShaderProgram *)&programs[(id>>24)&15];
+    return &test_comb;
 }
 static void import_texture(int i) {
     rendering_state.textures[i]=&textures[i];
@@ -100,8 +111,26 @@ static void gfx_flush(void) {
     if (!buf_vbo_num_tris) return;
     emit("D",1);
     emit(&buf_vbo_num_tris,sizeof(buf_vbo_num_tris));
-    emit(&buf_vbo_len,sizeof(buf_vbo_len));
-    emit(buf_vbo,buf_vbo_len*sizeof(float));
+    if (!packed_batch) {
+        emit(&buf_vbo_len,sizeof(buf_vbo_len));
+        emit(buf_vbo,buf_vbo_len*sizeof(float));
+    } else {
+        size_t base=4+(batch_texture?4:0);
+        size_t colors=batch_inputs+(batch_fog?1:0);
+        size_t expanded=(base+colors*4)*buf_vbo_num_tris*3;
+        assert(buf_vbo_len==(base+colors)*buf_vbo_num_tris*3);
+        emit(&expanded,sizeof(expanded));
+        const float *p=buf_vbo;
+        for(size_t i=0;i<buf_vbo_num_tris*3;i++) {
+            emit(p,base*sizeof(float));p+=base;
+            for(size_t c=0;c<colors;c++,p++) {
+                const uint8_t *rgba=(const uint8_t *)p;
+                float normalized[4];
+                for(unsigned k=0;k<4;k++) normalized[k]=rgba[k]/255.0f;
+                emit(normalized,sizeof(normalized));
+            }
+        }
+    }
     buf_vbo_len=buf_vbo_num_tris=0;
 }
 '''
@@ -248,20 +277,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--fast-math", action="store_true", help="Also enable the Wii U build's floating-point optimization flag")
-    parser.add_argument("--writer", choices=["baseline", "prepared"], default="prepared")
+    parser.add_argument("--writer", choices=["baseline", "packed"], default="packed")
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
     sources = [args.reference.read_text(), (ROOT/"src/pc/gfx/gfx_pc.c").read_text()]
-    if args.writer == "baseline":
-        assert sources[1].count("bool use_prepared_material = true;") == 1
-        sources[1] = sources[1].replace("bool use_prepared_material = true;", "bool use_prepared_material = false;")
     with tempfile.TemporaryDirectory() as temp:
         temp = Path(temp)
         outputs = []
         for index, source in enumerate(sources):
             c = temp/f"geometry{index}.c"
             exe = temp/f"geometry{index}"
-            c.write_text(make_harness(source))
+            harness=make_harness(source)
+            if index==1 and args.writer=="packed":
+                harness=harness.replace("gfx_rapi=&api;", "gfx_rapi=&api; packed_mode=true;")
+            c.write_text(harness)
             flags = ["-ffast-math"] if args.fast_math else []
             if args.sanitize:
                 flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie"]

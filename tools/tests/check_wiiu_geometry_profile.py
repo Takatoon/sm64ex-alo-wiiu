@@ -34,6 +34,7 @@ HARNESS = r'''
 #include <malloc.h>
 #define WIIU_LOAD_TIMING_PROFILE 1
 #include "pc/gfx/gfx_gx2.h"
+#include "pc/gfx/wiiu_vertex_format.h"
 using std::isfinite;
 using OSTime = int64_t;
 static OSTime clock_tick;
@@ -46,17 +47,19 @@ static void *test_memalign(size_t alignment,size_t bytes) {
 }
 #define memalign test_memalign
 static const void *last_bound;
+static size_t last_stride;
 static void WHBLogPrintf(const char*, ...) { ++invalid_logs; }
 static const int GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER=1;
 static const int GX2_PRIMITIVE_MODE_TRIANGLES=2;
 static void GX2Invalidate(int,void*,size_t) { ++publications; }
-static void GX2SetAttribBuffer(int,size_t,size_t,void *p) { ++bindings; last_bound=p; }
+static void GX2SetAttribBuffer(int,size_t,size_t stride,void *p) { ++bindings; last_bound=p;last_stride=stride; }
 static void GX2DrawEx(int,size_t,int,int) {
     // A new buffer publication and binding must precede every draw.
     assert(publications>draws && bindings==draws+1); ++draws;
 }
 static void GX2DrawDone() { ++waits; }
-struct ShaderProgram { uint32_t shader_id; size_t num_floats; };
+struct ShaderProgram { uint32_t shader_id; size_t num_floats; struct {size_t packedVertexStride;} group; };
+static bool packed_colors;
 static ShaderProgram shader = {1,8};
 static ShaderProgram *current_shader_program=&shader;
 struct VboBlock { uint8_t *data; size_t capacity,used; };
@@ -134,6 +137,12 @@ int main() {
     assert(reused==reinterpret_cast<float*>(vbo_blocks[0].data));
     assert(gfx_gx2_reserve_vertices(SIZE_MAX)==nullptr);
     assert(gfx_gx2_reserve_vertices(0)==nullptr);
+    packed_colors=true;shader.group.packedVertexStride=20;
+    float rgba_batch[15];for(float &v:rgba_batch)v=1.0f;
+    for(unsigned i=4;i<15;i+=5) wiiu_vertex_store_rgba8(&rgba_batch[i],255,255,255,255);
+    unsigned old_draws=draws,old_invalid=invalid_logs;
+    gfx_gx2_draw_triangles(rgba_batch,15,1);
+    assert(draws==old_draws+1&&invalid_logs==old_invalid&&last_stride==20);
     const uint64_t validation=gfx_gx2_frame_profile.ticks[WIIU_GX2_VALIDATE];
     current_shader_program=nullptr;
     gfx_gx2_draw_triangles(vertices,24,1);
@@ -153,7 +162,7 @@ def main():
         path = temp/"profile.cpp"
         path.write_text(HARNESS + "\n".join(extract(source,n) for n in names) + TEST)
         exe = temp/"profile"
-        subprocess.run(["c++", "-std=c++17", "-O2", "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-I"+str(ROOT/"src"), str(path), "-o", str(exe)], check=True)
+        subprocess.run(["c++", "-std=c++17", "-O2", "-fsanitize=address,undefined", "-no-pie", "-fno-omit-frame-pointer", "-I"+str(ROOT/"src"), str(path), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
 

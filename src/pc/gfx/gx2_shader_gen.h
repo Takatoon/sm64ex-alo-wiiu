@@ -11,6 +11,8 @@ struct ShaderGroup {
     GX2VertexShader vertexShader;
     GX2PixelShader pixelShader;
     GX2FetchShader fetchShader;
+    GX2FetchShader packedFetchShader;
+    uint32_t packedVertexStride;
 
     uint32_t numAttributes;
     GX2AttribStream attributes[7];
