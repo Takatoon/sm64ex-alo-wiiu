@@ -844,3 +844,31 @@ therefore reaches its cap in lighter workloads. Review overloaded 30 FPS
 presentation before claiming a universally stable 30 FPS mode, then split
 remaining triangle/list processing time to select the next optimization.
 No renderer changes or new WUHB were made for this analysis.
+
+## Batch-capacity experiment disposition (2026-11-14)
+
+The user requested closing the current test record and committing outstanding
+work. The renderer, FPS selector and capacity trial were already committed in
+`6294da88`, `05cb8bfe` and `561deae4`; the BOB analysis was recorded in
+`49fbd6fa`. No source changes were outstanding when this review began.
+
+Record the capacity trial as evaluated with **no demonstrated substantial FPS
+benefit**, rather than as a retained speedup or an unfinished measurement.
+Keep 256 as the comparison/default limit. Do not adopt 512/1024 or automatic
+sizing solely because capacity flushes fell. Moving-camera measurements do
+not exclude a small benefit in a different scene, but they do not establish one.
+The diagnostic build still permits all three sizes; this documentation update
+does not remove that code, change its behavior or produce another WUHB.
+
+This conclusion concerns batch capacity, not the vertex-reuse cache introduced
+with indexed B. Retain B and RGBA8 as the successful rendering changes. A normal
+release still needs to enable indexed drawing outside profiling and remove the
+extra storage reserved for the capacity experiment while preserving the live
+30/60 selector. Treat that consolidation as separate work, not as already done.
+
+Next investigations: overloaded 30 FPS presentation, finer CPU triangle/list
+timing, and a controlled native-30 comparison. CPU geometry preparation is the
+main observed limit; GPU headroom is unmeasured because a finish-render wait is
+not total GPU execution time. Larger CPU/GPU pipeline or GPU-model-rendering
+changes remain research proposals, without measured FPS estimates. The deferred
+Galaxy metal appearance and specific HMC jump-fix verification remain pending.
