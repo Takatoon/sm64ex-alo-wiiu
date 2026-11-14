@@ -547,3 +547,32 @@ This is an **experiment pending hardware visual and performance validation**.
 No RGBA8 speedup or pixel-exact GPU output is claimed yet. Non-profile builds
 default to float colors. See [the status and next steps](wiiu-optimization-status.md)
 for the commit breakdown, measured improvements and deferred ideas.
+
+## First RGBA8 hardware capture
+
+Snapshot `../sm64ex-alo/logs/wiiu/galaxy-packed-colors-session-20261114.log`,
+parsed results `../sm64ex-alo/logs/wiiu/galaxy-packed-colors-analysis-20261114.json`.
+The user reports no visible color change in the tested scenes. This is initial
+visual feedback, not exhaustive validation of every material/scene.
+
+Run 1 completes all four blocks in the fixed initial exterior view. Median
+whole-DL times are 7.223/6.201/7.230/6.210 ms (float/RGBA8/float/RGBA8).
+This is a repeated ~1.02 ms / 14.1% reduction. Vertex bytes per image decrease
+from ~363 KB to ~273 KB, approximately 25%, while triangle counts stay ~2,560.
+FPS across reported intervals is 58.214/59.499/58.213/59.499, near the display cap.
+
+Run 2 tests a slower fixed view (player -1016,313,3185; reported camera
+-1244,410,3672). Its first pair completes: 7.177 -> 6.172 ms whole DL and
+40.055 -> 55.166 FPS across measured intervals. Counts stay ~2,527 triangles;
+VBO bytes fall from ~357 KB to ~268 KB. The next float block also completes
+(7.175 ms / 39.980 FPS), followed by a partial RGBA8 block (6.173 ms /
+54.983 FPS), but a scene reset interrupts that fourth block at 13.9 seconds.
+Treat this second pair as supporting partial evidence, not a completed second
+four-block comparison. A third run starts after the camera/player move.
+
+No invalid-geometry/exception reports or new VBO allocations appear in the
+analyzed blocks. Direct storage is used throughout. Finish-render waiting in
+the slower view remains around 9 ms; do not interpret its duration as isolated
+GPU time. The tested slower view improves substantially but is not locked to
+60 FPS. Further scene/model/transparency/fog visual checks remain appropriate
+before making compact colors the non-profile default.

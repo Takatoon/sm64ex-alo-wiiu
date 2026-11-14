@@ -13,7 +13,7 @@ antes de crear la rama. `main` no se modifica.
 | `e903d4f6` | Reutilizar la preparación del material entre comandos de vértices y triángulos. | Evita consultas repetidas de shader, texturas y estado. Invalidación conservadora al cambiar otros comandos. Sin resultado aislado de FPS. |
 | `f15f6c7d` | Escribir atributos directamente en el búfer de GX2, evitando la copia intermedia. | Mejora confirmada en una vista inicial: dos bloques de copia a 46,4 FPS frente a dos directos a 59,4 FPS. La preparación baja aproximadamente un 4,4 %. No garantiza 60 FPS en todas las vistas. |
 | `16beeed5` | Preparar constantes del material una sola vez; conservar valores dinámicos por vértice y redondeo del LOD. | Ahorro de aproximadamente 0,07–0,10 ms por imagen, un 1–1,3 %. En la vista lenta ambos métodos siguen a 40 FPS. |
-| `fd0d2f97` | Formato experimental RGBA8 para colores y niebla, con lectores de atributos independientes para float y compacto. | Implementado, tests de CPU y compilación de Wii U verificados. Pendiente de validar imagen y rendimiento en consola. |
+| `fd0d2f97` | Formato experimental RGBA8 para colores y niebla, con lectores de atributos independientes para float y compacto. | Primera prueba: ~1 ms / 14 % menos preparación y ~25 % menos datos. En una pareja completa de la vista lenta, ~40 → 55 FPS. El usuario no aprecia cambios de color; faltan comprobaciones visuales más amplias. |
 
 Los resultados proceden de comparaciones en la misma cámara con Galaxy,
 1920×1080 y registros activados. Son resultados de esas escenas, no una promesa
