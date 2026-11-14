@@ -1363,6 +1363,21 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
     model_geometry_profile.vertices += n_vertices;
     ++model_geometry_profile.batches;
 #endif
+    // These values and light directions are constant for the entire load.
+    const float aspect_ratio = (float)gfx_current_dimensions.width / (float)gfx_current_dimensions.height;
+    const bool lighting = (rsp.geometry_mode & G_LIGHTING) != 0;
+    const bool texture_gen = (rsp.geometry_mode & G_TEXTURE_GEN) != 0;
+    const bool fog = (rsp.geometry_mode & G_FOG) != 0;
+    if (n_vertices != 0 && lighting && rsp.lights_changed) {
+        for (int i = 0; i < rsp.current_num_lights - 1; i++) {
+            calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
+        }
+        static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0};
+        static const Light_t lookat_y = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
+        calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
+        calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
+        rsp.lights_changed = false;
+    }
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const Vtx_t *v = &vertices[i].v;
         const Vtx_tn *vn = &vertices[i].n;
@@ -1373,23 +1388,12 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         float z = v->ob[0] * rsp.MP_matrix[0][2] + v->ob[1] * rsp.MP_matrix[1][2] + v->ob[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
         float w = v->ob[0] * rsp.MP_matrix[0][3] + v->ob[1] * rsp.MP_matrix[1][3] + v->ob[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
 
-        x = gfx_adjust_x_for_aspect_ratio(x);
+        x = x * (4.0f / 3.0f) / aspect_ratio;
 
         short U = v->tc[0] * rsp.texture_scaling_factor.s >> 16;
         short V = v->tc[1] * rsp.texture_scaling_factor.t >> 16;
 
-        if (rsp.geometry_mode & G_LIGHTING) {
-            if (rsp.lights_changed) {
-                for (int i = 0; i < rsp.current_num_lights - 1; i++) {
-                    calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
-                }
-                static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0};
-                static const Light_t lookat_y = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
-                calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
-                calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
-                rsp.lights_changed = false;
-            }
-
+        if (lighting) {
             const bool useFirstColor = (dest_index & 1) == 0;
             const unsigned char* col = useFirstColor ? rsp.current_lights[rsp.current_num_lights - 1].col : rsp.current_lights[rsp.current_num_lights - 1].colc;
             int r = col[0];
@@ -1414,7 +1418,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             d->color.g = g > 255 ? 255 : g;
             d->color.b = b > 255 ? 255 : b;
 
-            if (rsp.geometry_mode & G_TEXTURE_GEN) {
+            if (texture_gen) {
                 float dotx = 0, doty = 0;
                 dotx += vn->n[0] * rsp.current_lookat_coeffs[0][0];
                 dotx += vn->n[1] * rsp.current_lookat_coeffs[0][1];
@@ -1465,7 +1469,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         d->z = z;
         d->w = w;
 
-        if (rsp.geometry_mode & G_FOG) {
+        if (fog) {
             if (fabsf(w) < 0.001f) {
                 // To avoid division by zero
                 w = 0.001f;
