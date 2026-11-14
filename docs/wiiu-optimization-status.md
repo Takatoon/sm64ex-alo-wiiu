@@ -69,8 +69,14 @@ agua y fuego. Sigue siendo una comprobación parcial de RGBA8.
 - El selector FPS se ofrece en compilaciones HIGH_FPS_PC; las nativas de 30
   permanecen a 30. A 30, los registros de fase solo contienen `current`; una
   ventana de 120 imágenes dura unos cuatro segundos en vez de dos.
-- Ambos cambios están comprobados por pruebas automatizadas y compilación;
-  su funcionamiento y beneficio en consola quedan pendientes de esta prueba.
+- Prueba BOB con Render96 HD: medianas a objetivo 60 de **29,0 / 29,3 / 29,0
+  FPS** para 256/512/1024; a objetivo 30, **24,0 / 24,0 / 24,1 FPS**.
+  Los vaciados por capacidad bajan de unos 51 a 6, pero no hay ganancia
+  sustancial demostrada de FPS. Se jugó en movimiento, sin cámara idéntica.
+- La ruta de 30 sí dibuja solo la imagen actual. Bajo esta carga registra
+  ~7 ms extra de espera de presentación; revisar sincronización al superar
+  el presupuesto de 33,3 ms. Galaxy sí mantiene ~30 en escenas más ligeras.
+- El análisis no modifica el renderizador ni genera otra compilación.
 
 Resultados previos: con Galaxy y la misma vista lenta, B mejoró de **39,96 a
 59,44 FPS**, con preparación de **6,128 a 5,279 ms**. El usuario no aprecia

@@ -792,4 +792,55 @@ scenarios: all three limits retain byte-identical expanded output/order,
 including capacity flushes, partial vertex reloads and LOD changes. The 1024
 case passes both fast math and address/undefined-behavior sanitizers. Backend
 lifetime/resource checks and the profiling WUHB build pass. Console results
-for revision 11 are still pending.
+for revision 11 follow below.
+
+
+## BOB batch-capacity gameplay results (revision 11)
+
+Snapshot `../sm64ex-alo/logs/wiiu/batch-capacity-session-20261114.log`;
+analysis `../sm64ex-alo/logs/wiiu/batch-capacity-analysis-20261114.json`.
+Only the revision-11 session is analyzed; older exceptions in the shared
+receiver output precede it. This session has no invalid-geometry, shader
+failure, pool-exhaustion or exception records. Exclude runtime texture loads,
+new allocations and windows overlapping model/level initialization.
+
+The primary Render96 HD (choice 5) BOB walk ends at 00:10:01.564, when the
+user switches to Galaxy. Subsequent experiments are kept separate. Positions
+and cameras vary throughout the walk; there is no matched static-camera
+comparison, so small FPS differences cannot be assigned to the batch limit.
+No resolution/aspect/zoom changes are logged during that walk. Medians:
+
+| Target | Limit | Windows | FPS | Whole DL | Vertex load | Capacity flushes | Draws |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 30 | 256 | 17-19 | 23.975 | 28.146 ms | 10.057 ms | 52 | 175 |
+| 30 | 512 | 20-23 | 23.995 | 27.701 ms | 10.021 ms | 17.5 | 133.5 |
+| 30 | 1024 | 24-27 | 24.053 | 27.751 ms | 9.991 ms | 6 | 124 |
+| 60 | 256 | 32-36 | 28.978 | 27.849 ms | 9.843 ms | 51 | 169 |
+| 60 | 512 | 37-41 | 29.275 | 27.716 ms | 9.863 ms | 18 | 135 |
+| 60 | 1024 | 28-31,42-46 | 29.020 | 27.778 ms | 9.895 ms | 6 | 131 |
+
+The larger limit removes most capacity flushes but produces no demonstrated
+substantial FPS gain. Submission remains ~1.45-1.49 ms/image while vertex
+loading is ~10 ms and whole display-list work ~28 ms. Do not infer that fewer
+flushes alone justify an adaptive or larger default. The pool is 2 MiB across
+these samples, but the user had already exercised 1024 before BOB: this is
+retained high-water capacity, not independent memory-footprint measurements.
+
+Runtime 30 does use the intended route: 120 current images and no interpolated
+images per window. Runtime 60 has 60 current plus 60 interpolated. Under this
+Render96 load, target 30 spends a further ~6.7-7.3 ms/image in presentation,
+whereas target 60 spends almost none. Work before presentation is close to or
+above the 33.3 ms 30 Hz budget; fixed-interval synchronization is the first
+candidate to investigate. This is not proof that those waits can all be
+removed, nor a broken FPS multiplier. The loop updates game logic once per
+image at 30 and once per pair at 60: approximately 24 versus 14.5 logical
+updates/second in these runs. Presented FPS alone does not compare simulation
+speed equally between those modes when overloaded.
+
+Later Galaxy BOB runs remain near 59.444 FPS for all three limits, with a
+median of zero capacity flushes. Galaxy at target 30 in castle interior,
+SSL and LLL remains near 29.97 FPS; LLL has 21 clean windows. The selector
+therefore reaches its cap in lighter workloads. Review overloaded 30 FPS
+presentation before claiming a universally stable 30 FPS mode, then split
+remaining triangle/list processing time to select the next optimization.
+No renderer changes or new WUHB were made for this analysis.
