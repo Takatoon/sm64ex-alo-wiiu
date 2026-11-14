@@ -35,6 +35,7 @@ HARNESS = r'''
 #define WIIU_LOAD_TIMING_PROFILE 1
 #include "pc/gfx/gfx_gx2.h"
 #include "pc/gfx/wiiu_vertex_format.h"
+#include "pc/gfx/wiiu_vertex_cache.h"
 using std::isfinite;
 using OSTime = int64_t;
 static OSTime clock_tick;
@@ -51,11 +52,20 @@ static size_t last_stride;
 static void WHBLogPrintf(const char*, ...) { ++invalid_logs; }
 static const int GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER=1;
 static const int GX2_PRIMITIVE_MODE_TRIANGLES=2;
+static const int GX2_INDEX_TYPE_U16=4;
 static void GX2Invalidate(int,void*,size_t) { ++publications; }
 static void GX2SetAttribBuffer(int,size_t,size_t stride,void *p) { ++bindings; last_bound=p;last_stride=stride; }
 static void GX2DrawEx(int,size_t,int,int) {
     // A new buffer publication and binding must precede every draw.
     assert(publications>draws && bindings==draws+1); ++draws;
+}
+static unsigned indexed_draws;
+static const uint16_t *last_indices;
+static void GX2DrawIndexedEx(int mode,size_t count,int type,const void *indices,int offset,int instances) {
+    assert(type==GX2_INDEX_TYPE_U16 && indices);
+    last_indices=static_cast<const uint16_t*>(indices);
+    ++indexed_draws;
+    GX2DrawEx(mode,count,offset,instances);
 }
 static void GX2DrawDone() { ++waits; }
 struct ShaderProgram { uint32_t shader_id; size_t num_floats; struct {size_t packedVertexStride;} group; };
@@ -71,6 +81,26 @@ WiiUGx2FrameProfile gfx_gx2_frame_profile={};
 
 TEST = r'''
 int main() {
+    WiiUVertexCache cache{};
+    uint16_t found;
+    wiiu_vertex_cache_batch(&cache);
+    wiiu_vertex_cache_material(&cache);
+    assert(!wiiu_vertex_cache_find(&cache,67,0,&found));
+    wiiu_vertex_cache_store(&cache,67,17,7);
+    assert(wiiu_vertex_cache_find(&cache,67,17,&found)&&found==7);
+    assert(!wiiu_vertex_cache_find(&cache,67,18,&found));
+    wiiu_vertex_cache_reload(&cache,0,64);
+    assert(wiiu_vertex_cache_find(&cache,67,17,&found));
+    wiiu_vertex_cache_reload(&cache,67,1);
+    assert(!wiiu_vertex_cache_find(&cache,67,17,&found));
+    wiiu_vertex_cache_store(&cache,0,0,0);
+    cache.material=UINT32_MAX;
+    wiiu_vertex_cache_material(&cache);
+    assert(cache.material==1&&!wiiu_vertex_cache_find(&cache,0,0,&found));
+    wiiu_vertex_cache_store(&cache,0,0,0);
+    cache.batch=UINT32_MAX;
+    wiiu_vertex_cache_batch(&cache);
+    assert(cache.batch==1&&!wiiu_vertex_cache_find(&cache,0,0,&found));
     float vertices[480];
     for (float &v : vertices) v=1.0f;
     gfx_gx2_draw_triangles(vertices,24,1);
@@ -143,6 +173,41 @@ int main() {
     unsigned old_draws=draws,old_invalid=invalid_logs;
     gfx_gx2_draw_triangles(rgba_batch,15,1);
     assert(draws==old_draws+1&&invalid_logs==old_invalid&&last_stride==20);
+    gfx_gx2_finish_render();
+    float quad[20]; for(float &v:quad) v=1.0f;
+    for(unsigned i=4;i<20;i+=5) wiiu_vertex_store_rgba8(&quad[i],255,0,128,255);
+    uint16_t indices[6]={0,1,2,1,3,2};
+    auto before_vertices=gfx_gx2_frame_profile.submitted_vertices;
+    auto before_indices=gfx_gx2_frame_profile.ibo_bytes;
+    gfx_gx2_draw_indexed(quad,20,indices,2);
+    assert(indexed_draws==1 && gfx_gx2_frame_profile.indexed_draws==1);
+    assert(gfx_gx2_frame_profile.submitted_vertices==before_vertices+4);
+    assert(gfx_gx2_frame_profile.ibo_bytes==before_indices+12);
+    assert(!memcmp(last_indices,indices,sizeof(indices)));
+    const uint16_t *retained=last_indices;
+    indices[0]=3; // Backend owns the in-flight copy, not this scratch array.
+    assert(retained[0]==0);
+    const float *retained_vertices=static_cast<const float*>(last_bound);
+    gfx_gx2_draw_indexed(quad,20,indices,2);
+    assert(last_indices!=retained&&last_bound!=retained_vertices);
+    assert(retained[0]==0&&!memcmp(retained_vertices,quad,sizeof(quad)));
+    old_draws=draws;
+    indices[0]=4;
+    gfx_gx2_draw_indexed(quad,20,indices,2);
+    assert(draws==old_draws); // out-of-range index never reaches GX2
+    gfx_gx2_finish_render();
+    float *direct_indexed=gfx_gx2_reserve_vertices(160);
+    assert(direct_indexed);
+    for(unsigned i=0;i<160;i++) direct_indexed[i]=1.0f;
+    uint16_t many_indices[768];
+    for(unsigned i=0;i<768;i++) many_indices[i]=i%32;
+    auto copied_before=gfx_gx2_frame_profile.copied_draws;
+    auto direct_before=gfx_gx2_frame_profile.direct_draws;
+    gfx_gx2_draw_indexed(direct_indexed,160,many_indices,256);
+    assert(last_bound==direct_indexed);
+    assert(gfx_gx2_frame_profile.copied_draws==copied_before);
+    assert(gfx_gx2_frame_profile.direct_draws==direct_before+1);
+    assert(!memcmp(last_indices,many_indices,sizeof(many_indices)));
     const uint64_t validation=gfx_gx2_frame_profile.ticks[WIIU_GX2_VALIDATE];
     current_shader_program=nullptr;
     gfx_gx2_draw_triangles(vertices,24,1);
@@ -155,7 +220,7 @@ int main() {
 
 def main():
     source = (ROOT/"src/pc/gfx/gfx_gx2.cpp").read_text()
-    names = ["gfx_gx2_reserve_vbo", "gfx_gx2_reserve_vertices", "gfx_gx2_draw_triangles", "gfx_gx2_flush_vbo_cache",
+    names = ["gfx_gx2_reserve_vbo", "gfx_gx2_reserve_vertices", "gfx_gx2_submit_triangles", "gfx_gx2_draw_triangles", "gfx_gx2_draw_indexed", "gfx_gx2_flush_vbo_cache",
              "gfx_gx2_end_frame", "gfx_gx2_finish_render"]
     with tempfile.TemporaryDirectory() as temp:
         temp = Path(temp)

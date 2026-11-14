@@ -268,7 +268,7 @@ static void controller_wiiu_read(OSContPad* pad) {
     bool toggle=false;
     for (unsigned device=0;device<2;device++)
         toggle |= wiiu_color_button_step(&color_button[device], color_keys[device], color_connected[device]);
-    if (toggle) gfx_profile_toggle_colors();
+    if (toggle) gfx_profile_toggle_geometry();
 #endif
 #ifdef DYNOS
     for(unsigned device=0;device<2;device++) {

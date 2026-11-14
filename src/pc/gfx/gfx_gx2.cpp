@@ -62,8 +62,11 @@ static uint8_t shader_program_pool_size = 0;
 
 static struct ShaderProgram* current_shader_program = nullptr;
 static bool packed_colors = true;
+static bool indexed_geometry;
 
 extern "C" bool gfx_gx2_packed_colors(void) { return packed_colors; }
+extern "C" bool gfx_gx2_indexed(void) { return indexed_geometry; }
+extern "C" void gfx_gx2_set_indexed(bool enabled) { indexed_geometry = enabled; }
 
 struct VboBlock
 {
@@ -526,7 +529,8 @@ extern "C" float *gfx_gx2_reserve_vertices(size_t float_capacity)
     return block ? reinterpret_cast<float*>(block->data + block->used) : nullptr;
 }
 
-static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris)
+static void gfx_gx2_submit_triangles(float buf_vbo[], size_t buf_vbo_len,
+        size_t buf_vbo_num_tris, const uint16_t *indices)
 {
     if (!current_shader_program)
         return;
@@ -541,7 +545,9 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     // Large finite clip coordinates can be valid: do not impose a size cutoff.
     static unsigned int invalid_batches = 0;
     bool valid = stride >= 4 && buf_vbo_len % stride == 0 &&
-                 buf_vbo_len / stride == buf_vbo_num_tris * 3;
+                 (indices ? buf_vbo_len / stride > 0 &&
+                            buf_vbo_len / stride <= buf_vbo_num_tris * 3 :
+                            buf_vbo_len / stride == buf_vbo_num_tris * 3);
     size_t bad_vertex = 0;
     if (valid)
     {
@@ -552,6 +558,15 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
             {
                 valid = false;
                 bad_vertex = offset / stride;
+                break;
+            }
+        }
+    }
+    if (valid && indices) {
+        for (size_t i = 0; i < buf_vbo_num_tris * 3; ++i) {
+            if (indices[i] >= buf_vbo_len / stride) {
+                valid = false;
+                bad_vertex = indices[i];
                 break;
             }
         }
@@ -592,12 +607,24 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
 #endif
     if (!direct) memcpy(new_vbo, buf_vbo, vbo_len);
     block->used += vbo_len;
+    uint16_t *new_indices = nullptr;
+    const size_t index_bytes = indices ? buf_vbo_num_tris * 3 * sizeof(uint16_t) : 0;
+    if (indices) {
+        VboBlock *index_block = gfx_gx2_reserve_vbo(index_bytes);
+        if (!index_block) return;
+        new_indices = reinterpret_cast<uint16_t*>(index_block->data + index_block->used);
+        memcpy(new_indices, indices, index_bytes);
+        index_block->used += index_bytes;
+    }
 #ifdef WIIU_LOAD_TIMING_PROFILE
     const OSTime publish_begin = OSGetTime();
-    if (!direct) gfx_gx2_frame_profile.ticks[WIIU_GX2_COPY] += publish_begin - copy_begin;
+    if (!direct || indices) gfx_gx2_frame_profile.ticks[WIIU_GX2_COPY] += publish_begin - copy_begin;
     if (direct) ++gfx_gx2_frame_profile.direct_draws;
     else ++gfx_gx2_frame_profile.copied_draws;
     gfx_gx2_frame_profile.vbo_bytes += vbo_len;
+    gfx_gx2_frame_profile.ibo_bytes += index_bytes;
+    gfx_gx2_frame_profile.submitted_vertices += buf_vbo_len / stride;
+    if (indices) ++gfx_gx2_frame_profile.indexed_draws;
     ++gfx_gx2_frame_profile.draw_calls;
 #endif
 
@@ -605,15 +632,32 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
     // their draw. An end-of-frame invalidate is too late if GX2 has already
     // submitted/consumed an earlier command-buffer segment.
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_vbo, vbo_len);
+    if (new_indices)
+        GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_indices, index_bytes);
 #ifdef WIIU_LOAD_TIMING_PROFILE
     const OSTime draw_begin = OSGetTime();
     gfx_gx2_frame_profile.ticks[WIIU_GX2_PUBLISH] += draw_begin - publish_begin;
 #endif
     GX2SetAttribBuffer(0, vbo_len, sizeof(float) * stride, new_vbo);
-    GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
+    if (new_indices)
+        GX2DrawIndexedEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris,
+                        GX2_INDEX_TYPE_U16, new_indices, 0, 1);
+    else
+        GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
 #ifdef WIIU_LOAD_TIMING_PROFILE
     gfx_gx2_frame_profile.ticks[WIIU_GX2_DRAW] += OSGetTime() - draw_begin;
 #endif
+}
+
+static void gfx_gx2_draw_triangles(float buf_vbo[], size_t float_count, size_t triangles)
+{
+    gfx_gx2_submit_triangles(buf_vbo, float_count, triangles, nullptr);
+}
+
+extern "C" void gfx_gx2_draw_indexed(float *vertices, size_t float_count,
+        const uint16_t *indices, size_t triangles)
+{
+    gfx_gx2_submit_triangles(vertices, float_count, triangles, indices);
 }
 
 static void gfx_gx2_get_framebuffer(uint16_t *buffer) {

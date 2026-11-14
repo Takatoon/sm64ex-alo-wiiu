@@ -23,6 +23,17 @@
 #endif
 #endif
     for (int i = 0; i < 3; i++) {
+#ifdef GFX_INDEXED_GEOMETRY
+        const unsigned slot = v_arr[i] - rsp.loaded_vertices;
+        uint16_t vertex_index;
+        if (wiiu_vertex_cache_find(&vertex_reuse, slot, packed_lod, &vertex_index)) {
+            buf_indices[buf_vbo_num_tris * 3 + i] = vertex_index;
+            continue;
+        }
+        vertex_index = buf_unique_vertices++;
+        wiiu_vertex_cache_store(&vertex_reuse, slot, packed_lod, vertex_index);
+        buf_indices[buf_vbo_num_tris * 3 + i] = vertex_index;
+#endif
         float z = v_arr[i]->z, w = v_arr[i]->w;
         if (z_is_from_0_to_1) {
             z = (z + w) / 2.0f;

@@ -636,3 +636,56 @@ keys/chords/disconnects, no timer-driven changes and pair-boundary application.
 Actual overlay functions are tested with FPS disabled, a warmup FPS sample and
 the cached options background. Geometry equivalence and cache rollover checks
 also pass. The native Wii U build compiles and packages with the same filename.
+
+
+## Indexed geometry trial (revision 10)
+
+The user approved RGBA8 after hardware timing and visual checks. It is now
+also the default outside profiling. Galaxy's red metal-cap appearance occurs
+in both float/RGBA8, was reported only for Galaxy, and is deferred at the
+user's request; it is not treated as evidence that RGBA8 changes that material.
+
+This trial keeps RGBA8 fixed and replaces the manual color selector with a
+manual indexed-geometry selector. The HUD displays `R A` for the existing
+expanded stream and `R B` for the indexed stream. It starts in A. A standalone
+Minus tap toggles on release at the next render-pair boundary; model-selection
+chords still work. No timer changes the mode. Use 20-second A/B/A/B segments
+with the same Galaxy model, camera, position, resolution, GamePad and filtering.
+The same filename/title and debugging/profiling options are retained.
+
+The B frontend caches the serialized attributes of each RSP vertex slot
+inside a submission batch. Partial vertex reloads invalidate only their slots;
+material preparation and batch changes invalidate their generations. The
+quantized triangle-dependent LOD is included in the key. Unused attributes,
+fog-as-alpha, generated UVs, culling arithmetic, triangle order, capacity
+flushes and interpolated/current phases retain the existing semantics. This
+reduces attribute preparation/duplication; CPU matrix and lighting calculations
+on RSP vertex loads are still performed as before.
+
+The backend stages native-endian uint16 indices in the same aligned arena as
+the vertex data, publishes both streams before `GX2DrawIndexedEx` (U16 big
+endian on Wii U), and retains both until the existing finish-render wait.
+The scratch index array is never handed to the GPU directly. No waits were
+removed. `MODEL_INDEX_WINDOW` identifies the method; `MODEL_GX2` adds
+`avg_ibo_bytes`, `avg_unique_vertices` and `indexed_draws`. Compare VBO+IBO
+bytes together. The copy timer includes index staging in B. CPU API durations
+remain CPU durations, not GPU timestamp queries.
+
+Validation:
+
+- `check_wiiu_geometry.py --reference <pre-indexed gfx_pc.c> --writer indexed`
+  passes both Wii U fast-math and address/undefined-behavior sanitizer modes:
+  21,083,717 expanded bytes match across 240 state/geometry scenarios, including
+  partial reloads, capacity flushes, material changes, fog, LOD and rectangles.
+- The synthetic workload reuses 240,886 references and serializes 76,433
+  vertices; these workload-specific counts are not a console speedup estimate.
+- The same comparison with `--writer packed --fast-math` confirms A retains
+  its preceding output and draw batches.
+- `check_wiiu_geometry_profile.py` checks real submission functions: index
+  bounds, publication before draw, retained source copies, no overwrite of
+  in-flight vertex/index buffers, slot invalidation and generation wraparound.
+- Manual A/B and live overlay tests, texture-cache/resource tests and shutdown
+  tests pass. The profiling Wii U WUHB builds successfully.
+
+Actual GPU rendering and FPS benefit of B await hardware testing. The HMC/BBH
+floor-selection correction and minimap rebuild diagnostics are included too.

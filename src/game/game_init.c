@@ -101,7 +101,7 @@ static void display_fps_counter(void) {
 #ifdef EXT_OPTIONS_MENU
     if (!optmenu_open)
 #endif
-        print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 164, gfx_profile_color_indicator());
+        print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 164, gfx_profile_geometry_indicator());
 #endif
     if (!configShowFPS) {
         sFPSLastTime = 0;
@@ -127,7 +127,7 @@ static void display_fps_counter(void) {
 void display_menu_fps_counter(void) {
 #if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
     // Emit after the cached-background boundary, just like the live FPS.
-    print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 164, gfx_profile_color_indicator());
+    print_text(GFX_DIMENSIONS_RECT_FROM_LEFT_EDGE(22), 164, gfx_profile_geometry_indicator());
 #endif
     if (!configShowFPS) {
         sMenuFPSLastTime = 0;

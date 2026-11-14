@@ -42,6 +42,7 @@ PRELUDE = r'''
 #include "pc/gfx/gfx_cc.h"
 #include "pc/gfx/gfx_rendering_api.h"
 #include "pc/gfx/wiiu_vertex_format.h"
+#include "pc/gfx/wiiu_vertex_cache.h"
 #define MAX_LIGHTS 2
 #define MAX_VERTICES 64
 #define SCREEN_WIDTH 320
@@ -55,7 +56,9 @@ static unsigned shader_queries;
 static unsigned configFiltering=1;
 static unsigned reserve_calls;
 static bool direct_fails;
-static bool packed_mode, packed_batch, batch_texture, batch_fog;
+static bool packed_mode, indexed_mode, packed_batch, batch_texture, batch_fog;
+static size_t indexed_reuses, indexed_emitted;
+static bool gfx_gx2_indexed(void) { return indexed_mode; }
 static unsigned batch_inputs;
 static unsigned texture_mask, input_count;
 static bool gfx_gx2_packed_colors(void) { return packed_mode; }
@@ -118,10 +121,13 @@ static void gfx_flush(void) {
         size_t base=4+(batch_texture?4:0);
         size_t colors=batch_inputs+(batch_fog?1:0);
         size_t expanded=(base+colors*4)*buf_vbo_num_tris*3;
-        assert(buf_vbo_len==(base+colors)*buf_vbo_num_tris*3);
+        assert(buf_vbo_len==(base+colors)*(buf_vbo_indexed ? buf_unique_vertices : buf_vbo_num_tris*3));
+        if (buf_vbo_indexed) { indexed_reuses += buf_vbo_num_tris*3 - buf_unique_vertices; indexed_emitted += buf_unique_vertices; }
         emit(&expanded,sizeof(expanded));
-        const float *p=buf_vbo;
         for(size_t i=0;i<buf_vbo_num_tris*3;i++) {
+            size_t index=buf_vbo_indexed ? buf_indices[i] : i;
+            assert(index < buf_vbo_len/(base+colors));
+            const float *p=buf_vbo+index*(base+colors);
             emit(p,base*sizeof(float));p+=base;
             for(size_t c=0;c<colors;c++,p++) {
                 const uint8_t *rgba=(const uint8_t *)p;
@@ -270,6 +276,8 @@ def make_harness(source):
              "gfx_adjust_x_for_aspect_ratio", "gfx_sp_vertex", "gfx_sp_tri1", "gfx_draw_rectangle"]
     if "static void gfx_prepare_material_values(" in source:
         names.insert(names.index("gfx_sp_tri1"), "gfx_prepare_material_values")
+    if "static struct WiiUVertexCache vertex_reuse;" not in declarations:
+        declarations += "static bool buf_vbo_indexed;\nstatic uint16_t buf_indices[MAX_BUFFERED_TRIANGLES*3];\nstatic size_t buf_unique_vertices;\n"
     return PRELUDE + declarations + STUBS + invalidate + "\n".join(function(source,n) for n in names) + TEST
 
 
@@ -277,7 +285,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--fast-math", action="store_true", help="Also enable the Wii U build's floating-point optimization flag")
-    parser.add_argument("--writer", choices=["baseline", "packed"], default="packed")
+    parser.add_argument("--writer", choices=["baseline", "packed", "indexed"], default="packed")
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
     sources = [args.reference.read_text(), (ROOT/"src/pc/gfx/gfx_pc.c").read_text()]
@@ -288,8 +296,11 @@ def main():
             c = temp/f"geometry{index}.c"
             exe = temp/f"geometry{index}"
             harness=make_harness(source)
-            if index==1 and args.writer=="packed":
+            if index==1 and args.writer in ("packed", "indexed"):
                 harness=harness.replace("gfx_rapi=&api;", "gfx_rapi=&api; packed_mode=true;")
+            if index==1 and args.writer=="indexed":
+                harness=harness.replace("packed_mode=true;", "packed_mode=true; indexed_mode=true;")
+                harness=harness.replace("return 0;", "if(indexed_mode) { assert(indexed_reuses>0); fprintf(stderr, \"indexed_reuses=%zu indexed_emitted=%zu\\n\",indexed_reuses,indexed_emitted); } return 0;")
             c.write_text(harness)
             flags = ["-ffast-math"] if args.fast_math else []
             if args.sanitize:

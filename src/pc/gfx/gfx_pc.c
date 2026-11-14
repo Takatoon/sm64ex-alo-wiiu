@@ -60,6 +60,7 @@
 #endif
 #ifdef TARGET_WII_U
 #include "wiiu_vertex_format.h"
+#include "wiiu_vertex_cache.h"
 #endif
 
 #include "../platform.h"
@@ -318,6 +319,10 @@ static struct {
     uint8_t rgb_kind[4], alpha_kind[4];
     float constant_rgb[4][3], constant_alpha[4], fog_rgb[3];
 } triangle_state;
+static struct WiiUVertexCache vertex_reuse;
+static uint16_t buf_indices[MAX_BUFFERED_TRIANGLES * 3];
+static size_t buf_unique_vertices;
+static bool buf_vbo_indexed;
 #endif
 
 struct GfxDimensions gfx_current_dimensions;
@@ -405,13 +410,13 @@ static bool gfx_profile_interpolated;
 static struct WiiUGeometryAb geometry_ab;
 static bool geometry_ab_measure;
 static unsigned geometry_ab_run, geometry_ab_frames, geometry_ab_windows;
-static bool geometry_manual_packed = true;
+static bool geometry_manual_indexed = false;
 static bool geometry_manual_toggle;
-void gfx_profile_toggle_colors(void) {
+void gfx_profile_toggle_geometry(void) {
     geometry_manual_toggle = !geometry_manual_toggle;
 }
-const char *gfx_profile_color_indicator(void) {
-    return gfx_gx2_packed_colors() ? "R" : "F";
+const char *gfx_profile_geometry_indicator(void) {
+    return gfx_gx2_indexed() ? "R B" : "R A";
 }
 static void gfx_profile_ab_update(void);
 bool gfx_profile_ab_keep_awake(void) {
@@ -448,7 +453,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
         if (p->frames == 0) continue;
         const char *phase = i ? "interpolated" : "current";
 #define PHASE_AVG(field) (unsigned long long)(p->field / p->frames)
-        WHBLogPrintf("MODEL_PHASE revision=9 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
+        WHBLogPrintf("MODEL_PHASE revision=10 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
             window, level, model, phase, p->frames, p->slow_intervals,
             PHASE_AVG(total_us), (unsigned long long)p->max_total_us,
             PHASE_AVG(pre_us), PHASE_AVG(dl_us), PHASE_AVG(vertex_us),
@@ -457,7 +462,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
             PHASE_AVG(present_us), PHASE_AVG(draws), PHASE_AVG(triangles));
 #undef PHASE_AVG
 #define BACKEND_AVG(metric) gfx_profile_avg_ticks(p->backend.ticks[WIIU_GX2_##metric], p->frames)
-        WHBLogPrintf("MODEL_GX2 revision=9 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u",
+        WHBLogPrintf("MODEL_GX2 revision=10 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u avg_ibo_bytes=%llu avg_unique_vertices=%llu indexed_draws=%u",
             window, phase, p->frames,
             BACKEND_AVG(VALIDATE), BACKEND_AVG(STORAGE), BACKEND_AVG(COPY),
             BACKEND_AVG(PUBLISH), BACKEND_AVG(DRAW), BACKEND_AVG(BOUNDARY),
@@ -466,7 +471,10 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
             BACKEND_AVG(VIDEO_MODE),
             (unsigned long long)(p->backend.vbo_bytes / p->frames),
             p->backend.allocations, p->backend.draw_calls, p->backend.vsync_waits,
-            p->backend.direct_draws, p->backend.copied_draws);
+            p->backend.direct_draws, p->backend.copied_draws,
+            (unsigned long long)(p->backend.ibo_bytes / p->frames),
+            (unsigned long long)(p->backend.submitted_vertices / p->frames),
+            p->backend.indexed_draws);
 #undef BACKEND_AVG
     }
 }
@@ -481,16 +489,17 @@ static void gfx_profile_ab_update(void) {
 #ifndef WIIU_GEOMETRY_AUTO_AB
     static bool announced;
     if (geometry_manual_toggle || !announced) {
-        if (geometry_manual_toggle) geometry_manual_packed = !geometry_manual_packed;
+        if (geometry_manual_toggle) geometry_manual_indexed = !geometry_manual_indexed;
         geometry_manual_toggle = false;
         gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_COLOR revision=9 control=manual event=select method=%s indicator=%s",
-            geometry_manual_packed ? "rgba8" : "float_colors", geometry_manual_packed ? "R" : "F");
+        WHBLogPrintf("MODEL_AB revision=10 experiment=indexed_geometry control=manual event=select method=%s indicator=%s packed_colors=1",
+            geometry_manual_indexed ? "indexed" : "expanded", geometry_manual_indexed ? "B" : "A");
         announced = true;
     }
     // Apply only before the first image of a pair. Controller events merely
     // queue the change, so no pending display list sees its layout switched.
-    gfx_gx2_set_packed_colors(geometry_manual_packed);
+    gfx_gx2_set_packed_colors(true);
+    gfx_gx2_set_indexed(geometry_manual_indexed);
     geometry_ab_measure = true;
     geometry_ab.initialized = gCurrentArea != NULL && gMarioState != NULL;
     return;
@@ -540,8 +549,8 @@ static void gfx_profile_ab_update(void) {
     enum WiiUAbEvent event = wiiu_geometry_ab_step(&geometry_ab, now, eligible, changed);
     if ((event == WIIU_AB_RESET && was_running) || event == WIIU_AB_NEXT || event == WIIU_AB_DONE) {
         unsigned ended = previous_block + 1;
-        WHBLogPrintf("MODEL_AB revision=9 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
-            geometry_ab_run, ended, (ended & 1) ? "float_colors" : "rgba8", geometry_ab_frames,
+        WHBLogPrintf("MODEL_AB revision=10 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
+            geometry_ab_run, ended, (ended & 1) ? "expanded" : "indexed", geometry_ab_frames,
             geometry_ab_windows * 120, (unsigned)gfx_vcutm_profile.frames);
         geometry_ab_frames = 0;
         geometry_ab_windows = 0;
@@ -549,24 +558,25 @@ static void gfx_profile_ab_update(void) {
     }
     if (event == WIIU_AB_RESET) {
         gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_AB revision=9 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
+        WHBLogPrintf("MODEL_AB revision=10 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
     }
     if (event == WIIU_AB_START || event == WIIU_AB_NEXT) {
         if (event == WIIU_AB_START) ++geometry_ab_run;
         gfx_profile_ab_clear_window();
         geometry_ab_frames = 0;
-        WHBLogPrintf("MODEL_AB revision=9 experiment=packed_colors event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
+        WHBLogPrintf("MODEL_AB revision=10 experiment=indexed_geometry event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
             geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "rgba8" : "float_colors",
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "indexed" : "expanded",
             level, area, model, width, height, (int)player[0], (int)player[1], (int)player[2],
             (int)camera[0], (int)camera[1], (int)camera[2]);
     }
     if (event == WIIU_AB_DONE)
-        WHBLogPrintf("MODEL_AB revision=9 event=complete run=%u blocks=4", geometry_ab_run);
+        WHBLogPrintf("MODEL_AB revision=10 event=complete run=%u blocks=4", geometry_ab_run);
     geometry_ab_measure = wiiu_geometry_ab_measure(&geometry_ab, now);
     // Previous pair has completed; select a matching immutable fetch program
     // before either image of the next pair is submitted.
-    gfx_gx2_set_packed_colors(wiiu_geometry_ab_alternate(&geometry_ab));
+    gfx_gx2_set_packed_colors(true);
+    gfx_gx2_set_indexed(wiiu_geometry_ab_alternate(&geometry_ab));
 #endif
 }
 #endif
@@ -580,7 +590,12 @@ static void gfx_flush(void) {
         if (buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES)
             ++model_geometry_profile.full_flushes;
 #endif
-        gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
+#ifdef TARGET_WII_U
+        if (buf_vbo_indexed)
+            gfx_gx2_draw_indexed(buf_vbo, buf_vbo_len, buf_indices, buf_vbo_num_tris);
+        else
+#endif
+            gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
         model_geometry_profile.submit_us += osGetTime() - submit_begin_us;
 #endif
@@ -1403,6 +1418,10 @@ static float gfx_adjust_x_for_aspect_ratio(float x) {
 }
 
 static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
+#ifdef TARGET_WII_U
+    if (gfx_gx2_indexed())
+        wiiu_vertex_cache_reload(&vertex_reuse, dest_index, n_vertices);
+#endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     const uint64_t vertex_begin_us = osGetTime();
     model_geometry_profile.vertices += n_vertices;
@@ -1541,6 +1560,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
 #ifdef TARGET_WII_U
 static void gfx_prepare_material_values(struct ColorCombiner *comb, uint8_t num_inputs,
         bool use_alpha, bool use_fog) {
+    wiiu_vertex_cache_material(&vertex_reuse);
 #if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
     ++model_geometry_profile.uniform_prepares;
 #endif
@@ -1751,6 +1771,10 @@ retry_texture_bindings:;
 
 #ifdef TARGET_WII_U
     if (buf_vbo_len == 0) {
+        buf_vbo_indexed = gfx_rapi == &gfx_gx2_api &&
+                          gfx_gx2_packed_colors() && gfx_gx2_indexed();
+        buf_unique_vertices = 0;
+        wiiu_vertex_cache_batch(&vertex_reuse);
         // Acquire only after all material/texture changes have flushed. No
         // backend work can move this reservation while the batch is filled.
         float *direct = gfx_rapi == &gfx_gx2_api
@@ -1763,6 +1787,8 @@ retry_texture_bindings:;
         gfx_prepare_material_values(comb, num_inputs, use_alpha, use_fog);
     bool use_packed_colors = gfx_rapi == &gfx_gx2_api && gfx_gx2_packed_colors();
     if (use_packed_colors) {
+        if (buf_vbo_indexed) {
+#define GFX_INDEXED_GEOMETRY
 #define GFX_PREPARED_MATERIAL
 #define GFX_PACKED_COLORS
 #define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
@@ -1772,6 +1798,18 @@ retry_texture_bindings:;
 #undef EMIT_FLOAT
 #undef GFX_PACKED_COLORS
 #undef GFX_PREPARED_MATERIAL
+#undef GFX_INDEXED_GEOMETRY
+        } else {
+#define GFX_PREPARED_MATERIAL
+#define GFX_PACKED_COLORS
+#define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#define EMIT_RGBA(r,g,b,a) wiiu_vertex_store_rgba8(&buf_vbo[buf_vbo_len++], (r), (g), (b), (a))
+#include "gfx_triangle_emit.inc.h"
+#undef EMIT_RGBA
+#undef EMIT_FLOAT
+#undef GFX_PACKED_COLORS
+#undef GFX_PREPARED_MATERIAL
+        }
     } else
 #endif
     {
@@ -2942,6 +2980,9 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
     for (unsigned i = 0; i < WIIU_GX2_PROFILE_COUNT; ++i)
         phase->backend.ticks[i] += gfx_gx2_frame_profile.ticks[i];
     phase->backend.vbo_bytes += gfx_gx2_frame_profile.vbo_bytes;
+    phase->backend.ibo_bytes += gfx_gx2_frame_profile.ibo_bytes;
+    phase->backend.submitted_vertices += gfx_gx2_frame_profile.submitted_vertices;
+    phase->backend.indexed_draws += gfx_gx2_frame_profile.indexed_draws;
     phase->backend.allocations += gfx_gx2_frame_profile.allocations;
     phase->backend.draw_calls += gfx_gx2_frame_profile.draw_calls;
     phase->backend.vsync_waits += gfx_gx2_frame_profile.vsync_waits;
@@ -2998,14 +3039,14 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
         gfx_vcutm_window_sequence++;
         ++geometry_ab_windows;
 #ifdef WIIU_GEOMETRY_AUTO_AB
-        WHBLogPrintf("MODEL_AB_WINDOW revision=9 experiment=packed_colors window=%u run=%u block=%u method=%s",
+        WHBLogPrintf("MODEL_AB_WINDOW revision=10 experiment=indexed_geometry window=%u run=%u block=%u method=%s",
             (unsigned)gfx_vcutm_window_sequence, geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "rgba8" : "float_colors");
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "indexed" : "expanded");
 #else
-        WHBLogPrintf("MODEL_COLOR_WINDOW revision=9 control=manual window=%u method=%s",
-            (unsigned)gfx_vcutm_window_sequence, gfx_gx2_packed_colors() ? "rgba8" : "float_colors");
+        WHBLogPrintf("MODEL_INDEX_WINDOW revision=10 control=manual window=%u method=%s packed_colors=1",
+            (unsigned)gfx_vcutm_window_sequence, gfx_gx2_indexed() ? "indexed" : "expanded");
 #endif
-        WHBLogPrintf("MODEL_GEOMETRY revision=9 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
+        WHBLogPrintf("MODEL_GEOMETRY revision=10 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
                      (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
                      (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
                      (unsigned long long) (model_geometry_profile.submit_sum_us / 120),

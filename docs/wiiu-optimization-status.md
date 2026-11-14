@@ -9,8 +9,8 @@ antes de crear la rama. `main` no se modifica.
 | Commit | Cambio | Resultado / estado |
 | --- | --- | --- |
 | `80107af9` | Instrumentación de geometría, tiempos por fase, prueba A/B y prevención del sueño durante la prueba. | Herramientas de diagnóstico; no se contabilizan como una mejora de rendimiento. |
-| `7bbcffd2` | Preparar proporción de pantalla, indicadores y luces modificadas una vez por carga de vértices. | Geometría equivalente. Sin medición aislada de FPS para este cambio. |
-| `e903d4f6` | Reutilizar la preparación del material entre comandos de vértices y triángulos. | Evita consultas repetidas de shader, texturas y estado. Invalidación conservadora al cambiar otros comandos. Sin resultado aislado de FPS. |
+| `7bbcffd2` | Preparar proporción de pantalla, indicadores y luces modificadas una vez por carga de vértices. | Geometría equivalente; perfilado en consola junto con el resto de cambios. Falta una comparación controlada para atribuirle una ganancia individual. |
+| `e903d4f6` | Reutilizar la preparación del material entre comandos de vértices y triángulos. | Evita consultas repetidas de shader, texturas y estado. Invalidación conservadora al cambiar otros comandos. Perfilado junto con los demás cambios; sin ganancia individual aislada. |
 | `f15f6c7d` | Escribir atributos directamente en el búfer de GX2, evitando la copia intermedia. | Mejora confirmada en una vista inicial: dos bloques de copia a 46,4 FPS frente a dos directos a 59,4 FPS. La preparación baja aproximadamente un 4,4 %. No garantiza 60 FPS en todas las vistas. |
 | `16beeed5` | Preparar constantes del material una sola vez; conservar valores dinámicos por vértice y redondeo del LOD. | Ahorro de aproximadamente 0,07–0,10 ms por imagen, un 1–1,3 %. En la vista lenta ambos métodos siguen a 40 FPS. |
 | `fd0d2f97` | Formato experimental RGBA8 para colores y niebla, con lectores de atributos independientes para float y compacto. | Primera prueba: ~1 ms / 14 % menos preparación y ~25 % menos datos. En una pareja completa de la vista lenta, ~40 → 55 FPS. El usuario no aprecia cambios de color; faltan comprobaciones visuales más amplias. |
@@ -43,26 +43,33 @@ con los límites entre plantas del minimapa.
 En las pruebas visuales de color el usuario tampoco aprecia diferencias con
 agua y fuego. Sigue siendo una comprobación parcial de RGBA8.
 
-## Prueba actual: selector manual de color
+## Prueba actual: geometría indexada
 
-- Registros: `revision=9`, `control=manual`.
-- El HUD de TV muestra **F** para Float o **R** para RGBA8, debajo del lugar del contador de FPS. Se muestra aunque el contador esté desactivado.
-- Una pulsación corta de **−** cambia de formato al soltar el botón. El cambio se aplica al inicio del siguiente par de imágenes, sin alterar una imagen pendiente.
-- Empieza en **R**. La selección se conserva al moverse y cambiar de escena; no hay temporizador ni espera de 90 segundos para comparar el aspecto.
-- **− + izquierda/derecha** conserva el atajo de modelos de DynOS y no cambia el formato de color.
-- La alternancia automática de las pruebas anteriores queda desactivada por defecto; puede recuperarse al compilar con `WIIU_GEOMETRY_AUTO_AB` definido.
-- En ambos casos se conservan la escritura directa y las constantes preparadas.
-- Los tiempos del perfilado se separan al cambiar manualmente de formato. Una comparación de rendimiento manual requiere mantener la misma vista; para buscar fallos visuales se puede jugar y mover la cámara libremente.
-- Mario permanece despierto en la compilación de pruebas.
-- Posiciones y UV siguen en float. Cada campo de color pasa de 16 a 4 bytes;
-  la reducción del vértice completo depende de cuántos atributos use el shader.
-- La GPU recibe bytes RGBA y los normaliza mediante UNORM. El orden de canales,
-  las transparencias, la niebla y la representación en pantalla deben
-  comprobarse en la Wii U antes de considerar consolidado el cambio.
+- Registros: `revision=10`, `experiment=indexed_geometry`, `control=manual`.
+- RGBA8 está aprobado por el usuario y activado por defecto (`b121de77`).
+  Ambos métodos usan colores compactos, escritura directa y constantes
+  preparadas. Posiciones y coordenadas de textura siguen en float.
+- El indicador muestra **R A** (triángulos expandidos, control) o **R B**
+  (vértices compartidos con índices). Empieza en **R A**.
+- Pulsar y soltar **−** alterna A/B al inicio del siguiente par de imágenes.
+  No hay cambios automáticos ni espera inicial. El atajo de modelos
+  **− + izquierda/derecha** conserva su función.
+- Se conserva la selección al moverse, cambiar de nivel o abrir el menú.
+  El indicador sigue visible con el contador de FPS desactivado y por encima
+  del fondo estático del menú. Mario permanece despierto durante la prueba.
+- Para medir, mantener modelo, posición, cámara y opciones: unos 20 s en A,
+  20 s en B y repetir A/B. Los cambios de nivel o modelo no se contabilizan
+  como rendimiento estable. Comparar tanto una vista ligera como una lenta.
+- Los registros incluyen vértices realmente enviados, bytes de vértices e
+  índices, y número de dibujos indexados. No hay aún resultados en consola
+  del nuevo método; las pruebas de equivalencia no predicen FPS.
+- Fuera de la compilación de perfilado, el dibujo indexado sigue desactivado
+  mientras se valida. RGBA8 sí queda activado.
 
-El modo compacto se selecciona automáticamente sólo en la compilación con
-perfilado. Sin perfilado queda el formato float por defecto. No se han eliminado
-las esperas de finalización ni la publicación de datos antes de dibujar.
+La caché reutiliza un vértice solo dentro del mismo lote y material, con la
+misma versión del vértice y valor de LOD. Se conservan el descarte de caras,
+el orden de los triángulos, la interpolación y las transparencias. Los dos
+flujos de datos se publican antes de dibujar y se retienen hasta `GX2DrawDone`.
 
 WUHB de pruebas: `sm64-galaxy-phases-20261114.wuhb`, mismo nombre y título que
 las compilaciones anteriores para sustituirlo desde el mismo icono.
@@ -78,9 +85,9 @@ las compilaciones anteriores para sustituirlo desde el mismo icono.
 
 | Prioridad | Trabajo | Qué medir o comprobar antes de aplicarlo |
 | --- | --- | --- |
-| 1 | Completar la prueba RGBA8. | Apariencia correcta y cuatro bloques completos en una vista ligera y otra lenta; comparar bytes, tiempo total de preparación y FPS. |
-| 2 | Caché del vértice ya preparado para varios triángulos del mismo material. | Contar reutilizaciones reales y fallos de caché antes de implementarla. Invalidar al recargar el vértice o cambiar material; tratar aparte atributos que dependen del triángulo, como el LOD. |
-| 3 | Geometría indexada en GX2. | Cuántos atributos duplicados se evitarían y coste de producir los índices. Mantener orden, transparencia y límites de los lotes. Puede ser especialmente útil para modelos densos. |
+| 1 | Medir A/B de geometría indexada. | Misma cámara y modelo en A/B/A/B; comparar preparación total, vértices enviados, bytes incluyendo índices y FPS. RGBA8 fijo. |
+| 2 | Validar la caché de vértices preparados en consola. | Ya forma parte de B. Comprobar iluminación, niebla, texturas generadas, cambios de material y distintos modelos. |
+| 3 | Consolidar o descartar el dibujo indexado según las mediciones. | La equivalencia automatizada pasa; falta comprobar apariencia y rendimiento reales. |
 | 4 | Medir el coste gráfico del castillo por material/capa. | Usar mediciones de GPU; la duración de `GX2DrawDone` es una espera de la CPU, no una medida aislada del trabajo de GPU. Separar coste de escena y del modelo. |
 | 5 | Revisar el relleno y la alineación del formato de vértice. | Verificar si reducir bytes de UV compensa: el relleno existente es deliberado y quitarlo puede perjudicar las lecturas de la GPU. |
 | 6 | Transformación e iluminación de vértices más eficientes. | Perfilar sus operaciones y contrastar el código generado por el compilador de PowerPC. Validar redondeo, luces, niebla y recorte. |

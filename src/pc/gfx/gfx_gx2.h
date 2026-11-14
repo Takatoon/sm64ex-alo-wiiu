@@ -23,6 +23,12 @@ float *gfx_gx2_reserve_vertices(size_t float_capacity);
 /* Switch only between completed render pairs, never with a pending batch. */
 void gfx_gx2_set_packed_colors(bool enabled);
 bool gfx_gx2_packed_colors(void);
+void gfx_gx2_set_indexed(bool enabled);
+bool gfx_gx2_indexed(void);
+/* Indices are native-endian uint16_t. Both streams are retained in the
+ * backend arena and published before drawing, until finish_render retires. */
+void gfx_gx2_draw_indexed(float *vertices, size_t float_count,
+                        const uint16_t *indices, size_t triangle_count);
 void gfx_gx2_flush_vbo_cache(void);
 void gfx_gx2_free(void);
 struct WiiUTextureImage;
@@ -50,7 +56,9 @@ enum WiiUGx2ProfileMetric {
 struct WiiUGx2FrameProfile {
     uint64_t ticks[WIIU_GX2_PROFILE_COUNT];
     uint64_t vbo_bytes;
+    uint64_t ibo_bytes, submitted_vertices;
     uint32_t allocations, draw_calls, vsync_waits, direct_draws, copied_draws;
+    uint32_t indexed_draws;
 };
 extern struct WiiUGx2FrameProfile gfx_gx2_frame_profile;
 uint64_t gfx_gx2_profile_ticks_to_us(uint64_t ticks);

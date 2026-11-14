@@ -42,6 +42,8 @@ unsigned int configFiltering;
 struct GfxRenderingAPI gfx_gx2_api;
 float *gfx_gx2_reserve_vertices(size_t capacity) { (void)capacity; return NULL; }
 bool gfx_gx2_packed_colors(void) { return false; }
+bool gfx_gx2_indexed(void) { return false; }
+void gfx_gx2_draw_indexed(float *v,size_t n,const uint16_t *i,size_t t) { (void)v;(void)n;(void)i;(void)t; abort(); }
 void sys_fatal(const char *fmt, ...) { (void)fmt; abort(); }
 static unsigned ids, resets, draws;
 static uint32_t selected[2];
