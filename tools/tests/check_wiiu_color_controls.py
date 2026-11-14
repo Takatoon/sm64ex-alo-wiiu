@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise Minus gesture handling and the real manual indexed-geometry control functions."""
+"""Exercise Minus gesture handling and the real manual triangle-capacity control functions."""
 from pathlib import Path
 import re
 import subprocess
@@ -22,12 +22,14 @@ STUBS=r'''
 #include <string.h>
 #include "pc/gfx/wiiu_color_input.h"
 #include "pc/gfx/wiiu_geometry_ab.h"
-static bool geometry_manual_indexed=false,geometry_manual_toggle,geometry_ab_measure;
-static struct WiiUGeometryAb geometry_ab;
+static bool geometry_profile_awake,geometry_ab_measure;
+static unsigned geometry_buffer_choice,geometry_buffer_steps;
+static unsigned buf_triangle_limit=256;
 static void *gCurrentArea=(void *)1,*gMarioState=(void *)1;
 static bool packed,indexed;
 static unsigned resets,logs;
-static float pc_get_render_frame_multiplier(void) { return 2.0f; }
+static float multiplier=2.0f;
+static float pc_get_render_frame_multiplier(void) { return multiplier; }
 static void gfx_profile_ab_clear_window(void) { ++resets; }
 static void WHBLogPrintf(const char *fmt,...) { (void)fmt;++logs; }
 static void gfx_gx2_set_packed_colors(bool enable) { packed=enable; }
@@ -55,21 +57,32 @@ int main(void) {
  assert(!wiiu_color_button_step(&key,0,false));
  assert(!wiiu_color_button_step(&key,0,true));
  gfx_profile_ab_update();
- assert(packed&&!indexed&&geometry_ab_measure&&geometry_ab.initialized&&resets==1&&logs==1);
- assert(!strcmp(gfx_profile_geometry_indicator(),"R A"));
+ assert(packed&&indexed&&geometry_ab_measure&&geometry_profile_awake&&resets==1&&logs==1);
+ assert(!strcmp(gfx_profile_geometry_indicator(),"B 256"));
  for(int i=0;i<10000;i++) gfx_profile_ab_update();
- assert(packed&&!indexed&&logs==1&&resets==1); // no timer-driven alternation
+ assert(buf_triangle_limit==256&&logs==1&&resets==1);
  gfx_profile_toggle_geometry();
- assert(packed&&!indexed); // a queued input cannot switch a pending image's layout
+ assert(buf_triangle_limit==256); // queued input never changes a pending batch
  gfx_profile_ab_update();
- assert(packed&&indexed&&logs==2&&resets==2&&!strcmp(gfx_profile_geometry_indicator(),"R B"));
+ assert(buf_triangle_limit==512&&logs==2&&resets==2&&!strcmp(gfx_profile_geometry_indicator(),"B 512"));
  gCurrentArea=NULL;gfx_profile_ab_update();
- assert(packed&&indexed&&!geometry_ab.initialized);
+ assert(buf_triangle_limit==512&&!geometry_profile_awake);
  gCurrentArea=(void *)1;gfx_profile_ab_update();
- assert(packed&&indexed&&geometry_ab.initialized); // retain selection across scenes
+ assert(buf_triangle_limit==512&&geometry_profile_awake);
  gfx_profile_toggle_geometry();gfx_profile_ab_update();
- assert(packed&&!indexed&&logs==3&&resets==3&&!strcmp(gfx_profile_geometry_indicator(),"R A"));
- puts("PASS: manual A/B with RGBA8 fixed, pair-boundary switching, standalone tap, held key, chords and disconnects");
+ assert(buf_triangle_limit==1024&&logs==3&&!strcmp(gfx_profile_geometry_indicator(),"B 1024"));
+ gfx_profile_toggle_geometry();gfx_profile_ab_update();
+ assert(buf_triangle_limit==256&&logs==4);
+ multiplier=1;gfx_profile_ab_update();
+ assert(buf_triangle_limit==256&&logs==5&&resets==5); // separate FPS measurements
+ multiplier=2;gfx_profile_ab_update();
+ assert(logs==6);
+ gfx_profile_toggle_geometry();gfx_profile_toggle_geometry();gfx_profile_ab_update();
+ assert(buf_triangle_limit==1024&&logs==7);
+ for(int i=0;i<3;i++) gfx_profile_toggle_geometry();
+ gfx_profile_ab_update();assert(buf_triangle_limit==1024&&logs==7);
+ assert(packed&&indexed); // neither approved optimization changes during this trial
+ puts("PASS: 256/512/1024 cycle, FPS reset, queued changes, held key, chords and disconnects");
 }
 '''
 OVERLAY=r'''
@@ -88,8 +101,8 @@ static OSTime sFPSLastTime,sMenuFPSLastTime;
 static bool configShowFPS,optmenu_open,frame_ready;
 static unsigned labels,flushes;
 static char selected='A',drawn;
-static const char *gfx_profile_geometry_indicator(void) {return selected=='A'?"R A":"R B";}
-static void print_text(int x,int y,const char *s) {assert(x==22&&y==164);++labels;assert(s[0]=='R'&&s[1]==' ');drawn=s[2];}
+static const char *gfx_profile_geometry_indicator(void) {return selected=='A'?"B 256":"B 1024";}
+static void print_text(int x,int y,const char *s) {assert(x==22&&y==164);++labels;assert(s[0]=='B'&&s[1]==' ');drawn=s[2]=='2'?'A':'B';}
 static bool draw_fps_counter(OSTime *t,s16 *value) {(void)t;if(value)*value=60;return frame_ready;}
 static void render_text_labels(void) {++flushes;}
 static void WHBLogPrintf(const char *s,...) {(void)s;}
@@ -101,7 +114,7 @@ int main(void) {
  display_menu_fps_counter();assert(labels==2&&drawn=='B'&&flushes==1);
  configShowFPS=true;display_menu_fps_counter();assert(labels==3&&flushes==2);
  frame_ready=true;selected='A';display_menu_fps_counter();assert(labels==4&&drawn=='A'&&flushes==3);
- puts("PASS: R A / R B visible with FPS off and redrawn above the cached options background");
+ puts("PASS: buffer capacity visible with FPS off and redrawn above the cached options background");
 }
 '''
 def main():

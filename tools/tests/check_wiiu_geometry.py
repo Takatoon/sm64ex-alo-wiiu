@@ -77,7 +77,7 @@ static struct TextureHashmapNode textures[2];
 static bool rollover;
 static size_t emitted_bytes;
 static void emit(const void *p, size_t n) {
-    assert(n <= 1000000 && emitted_bytes + n <= 30000000);
+    assert(n <= 1000000 && emitted_bytes + n <= 100000000);
     emitted_bytes += n;
     assert(fwrite(p, 1, n, stdout) == n);
 }
@@ -212,7 +212,7 @@ int main(void) {
         }
         gfx_sp_vertex(64,0,vertices); record_vertices();
         // Reuse vertices, cross a capacity flush, then reload a partial range.
-        for(int i=0;i<900;i++) {
+        for(int i=0;i<2300;i++) {
             if(i==410) { gfx_sp_vertex(17,3,vertices+9); record_vertices(); }
             if(i==600) {
                 invalidate(G_SETENVCOLOR);
@@ -287,6 +287,7 @@ def main():
     parser.add_argument("--fast-math", action="store_true", help="Also enable the Wii U build's floating-point optimization flag")
     parser.add_argument("--writer", choices=["baseline", "packed", "indexed"], default="packed")
     parser.add_argument("--sanitize", action="store_true")
+    parser.add_argument("--batch-limit",type=int,choices=(256,512,1024),default=256)
     args = parser.parse_args()
     sources = [args.reference.read_text(), (ROOT/"src/pc/gfx/gfx_pc.c").read_text()]
     with tempfile.TemporaryDirectory() as temp:
@@ -296,6 +297,11 @@ def main():
             c = temp/f"geometry{index}.c"
             exe = temp/f"geometry{index}"
             harness=make_harness(source)
+            if index==0:
+                harness=harness.replace('#include "pc/gfx/gfx_pc.h"',
+                    '#include "pc/gfx/gfx_pc.h"\n#undef MAX_BUFFERED_TRIANGLES\n#define MAX_BUFFERED_TRIANGLES '+str(args.batch_limit))
+            elif 'static unsigned buf_triangle_limit' in harness:
+                harness=harness.replace('gfx_rapi=&api;', 'gfx_rapi=&api; buf_triangle_limit='+str(args.batch_limit)+';')
             if index==1 and args.writer in ("packed", "indexed"):
                 harness=harness.replace("gfx_rapi=&api;", "gfx_rapi=&api; packed_mode=true;")
             if index==1 and args.writer=="indexed":
@@ -310,7 +316,7 @@ def main():
             print(("reference: " if index == 0 else "optimized: ") + result.stderr.decode().strip())
             outputs.append(result.stdout)
         assert outputs[0] == outputs[1], "Vertex data, rejection or draw batches changed"
-        print(f"PASS: {len(outputs[0]):,} bytes identical across 240 geometry/state scenarios (writer={args.writer}, fast_math={args.fast_math}, sanitize={args.sanitize})")
+        print(f"PASS: {len(outputs[0]):,} bytes identical across 240 geometry/state scenarios (writer={args.writer}, fast_math={args.fast_math}, sanitize={args.sanitize}, batch_limit={args.batch_limit})")
 
 
 if __name__ == "__main__":

@@ -529,6 +529,16 @@ extern "C" float *gfx_gx2_reserve_vertices(size_t float_capacity)
     return block ? reinterpret_cast<float*>(block->data + block->used) : nullptr;
 }
 
+#ifdef WIIU_LOAD_TIMING_PROFILE
+extern "C" size_t gfx_gx2_vbo_reserved_bytes(void)
+{
+    size_t bytes = 0;
+    for (const VboBlock& block : vbo_blocks)
+        bytes += block.capacity;
+    return bytes;
+}
+#endif
+
 static void gfx_gx2_submit_triangles(float buf_vbo[], size_t buf_vbo_len,
         size_t buf_vbo_num_tris, const uint16_t *indices)
 {

@@ -1,7 +1,12 @@
 #ifndef GFX_PC_H
 #define GFX_PC_H
 
+#ifdef TARGET_WII_U
+/* Storage capacity; profiling selects a 256/512/1024 runtime batch limit. */
+#define MAX_BUFFERED_TRIANGLES 1024
+#else
 #define MAX_BUFFERED_TRIANGLES 256
+#endif
 #ifdef TARGET_WII_U
 #define VERTEX_BUFFER_SIZE MAX_BUFFERED_TRIANGLES * 28 * 3 // 3 vertices in a triangle and 28 floats per vtx
 #else

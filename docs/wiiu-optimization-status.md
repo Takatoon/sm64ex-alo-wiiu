@@ -43,36 +43,40 @@ con los límites entre plantas del minimapa.
 En las pruebas visuales de color el usuario tampoco aprecia diferencias con
 agua y fuego. Sigue siendo una comprobación parcial de RGBA8.
 
-## Prueba actual: geometría indexada
+## Prueba actual: tamaño del búfer y selector 30/60 FPS
 
-- Registros: `revision=10`, `experiment=indexed_geometry`, `control=manual`.
-- RGBA8 está aprobado por el usuario y activado por defecto (`b121de77`).
-  Ambos métodos usan colores compactos, escritura directa y constantes
-  preparadas. Posiciones y coordenadas de textura siguen en float.
-- El indicador muestra **R A** (triángulos expandidos, control) o **R B**
-  (vértices compartidos con índices). Empieza en **R A**.
-- Pulsar y soltar **−** alterna A/B al inicio del siguiente par de imágenes.
-  No hay cambios automáticos ni espera inicial. El atajo de modelos
-  **− + izquierda/derecha** conserva su función.
-- Se conserva la selección al moverse, cambiar de nivel o abrir el menú.
-  El indicador sigue visible con el contador de FPS desactivado y por encima
-  del fondo estático del menú. Mario permanece despierto durante la prueba.
-- Para medir, mantener modelo, posición, cámara y opciones: unos 20 s en A,
-  20 s en B y repetir A/B. Los cambios de nivel o modelo no se contabilizan
-  como rendimiento estable. Comparar tanto una vista ligera como una lenta.
-- Los registros incluyen vértices realmente enviados, bytes de vértices e
-  índices, y número de dibujos indexados. Primera comparación en la misma
-  vista lenta con Galaxy: **39,96 -> 59,44 FPS**, preparación **6,128 ->
-  5,279 ms** y datos totales **269 -> 138 KB** por imagen. En la vista inicial
-  ambos rondan 59,44 FPS. Falta ampliar las pruebas visuales y repetir A/B.
-- Fuera de la compilación de perfilado, el dibujo indexado sigue desactivado
-  mientras se valida. RGBA8 sí queda activado.
+- `05cb8bfe` recupera el selector local **Display > Frame Rate > 30/60 FPS**.
+  La elección se guarda como `frame_rate` y se aplica al terminar la actualización
+  actual. En 30 se restaura la lista al estado lógico actual y se dibuja una vez;
+  en 60 se mantiene el par interpolado/actual. Audio y lógica se actualizan una
+  sola vez. El contador de FPS usa el número real de imágenes por actualización.
+- Registros `revision=11`, `experiment=batch_capacity`. RGBA8 y el dibujo
+  indexado B permanecen activados durante toda la prueba.
+- El HUD muestra **B 256**, **B 512** o **B 1024**. Pulsar y soltar **−** cambia
+  cíclicamente el límite de triángulos, al comienzo de la siguiente actualización.
+  Empieza en 256. Los atajos **− + izquierda/derecha** conservan su función.
+- Las mediciones se reinician al cambiar de tamaño o de objetivo de FPS.
+  `MODEL_BUFFER_WINDOW` registra `triangles`, `target_fps` y `pool_bytes`,
+  además de los tiempos, bytes enviados, índices y vaciados ya existentes.
+- Comparar los tres tamaños con la misma cámara/modelo/opciones durante unos
+  20 s cada uno y volver a 256 para contrastar. Primero mantener 60 FPS;
+  después repetir a 30. No atribuir cargas de modelos o áreas al tamaño del lote.
+- La capacidad máxima de almacenamiento es 1024, pero la reserva por lote y
+  su vaciado obedecen al límite activo. El respaldo CPU crece de 84 a 336 KiB;
+  los índices ocupan 6 KiB. La caché de slots RSP permanece en 68 entradas.
+  El pool GPU conserva su capacidad máxima alcanzada hasta salir: `pool_bytes`
+  no tiene por qué bajar al volver a un tamaño menor.
+- El selector FPS se ofrece en compilaciones HIGH_FPS_PC; las nativas de 30
+  permanecen a 30. A 30, los registros de fase solo contienen `current`; una
+  ventana de 120 imágenes dura unos cuatro segundos en vez de dos.
+- Ambos cambios están comprobados por pruebas automatizadas y compilación;
+  su funcionamiento y beneficio en consola quedan pendientes de esta prueba.
 
-Prueba posterior en movimiento: el usuario no aprecia nuevos fallos gráficos.
-Con Render96 HD, B registra medianas de **31,3 FPS** en el castillo,
-**31,1** en HMC y **31,6** en COTMC; en VCUTM ronda **26,1**. No aparecen
-avisos de geometría inválida ni excepciones en esta sesión. Son resultados
-por escena, sin comparación A/B controlada de Render96 ni garantía global.
+Resultados previos: con Galaxy y la misma vista lenta, B mejoró de **39,96 a
+59,44 FPS**, con preparación de **6,128 a 5,279 ms**. El usuario no aprecia
+nuevos errores gráficos tras jugar con B. Render96 HD registra medianas de
+**31,3 FPS** en castillo, **31,1** en HMC y **31,6** en COTMC; VCUTM ronda
+**26,1**. Son resultados por escena, sin A/B controlado de Render96.
 
 La caché reutiliza un vértice solo dentro del mismo lote y material, con la
 misma versión del vértice y valor de LOD. Se conservan el descarte de caras,
@@ -93,7 +97,7 @@ las compilaciones anteriores para sustituirlo desde el mismo icono.
 
 | Prioridad | Trabajo | Qué medir o comprobar antes de aplicarlo |
 | --- | --- | --- |
-| 1 | Medir A/B de geometría indexada. | Misma cámara y modelo en A/B/A/B; comparar preparación total, vértices enviados, bytes incluyendo índices y FPS. RGBA8 fijo. |
+| 1 | Medir tamaños 256/512/1024 con B fijo. | Misma cámara/modelo y FPS objetivo; comparar preparación, FPS, vaciados y memoria. Repetir a 30 y 60 por separado. |
 | 2 | Validar la caché de vértices preparados en consola. | Ya forma parte de B. Comprobar iluminación, niebla, texturas generadas, cambios de material y distintos modelos. |
 | 3 | Consolidar o descartar el dibujo indexado según las mediciones. | La equivalencia y las primeras pruebas en consola pasan. Ampliar la validación visual y repetir las mediciones; Render96 aún no tiene un A comparable. |
 | 4 | Medir el coste gráfico del castillo por material/capa. | Usar mediciones de GPU; la duración de `GX2DrawDone` es una espera de la CPU, no una medida aislada del trabajo de GPU. Separar coste de escena y del modelo. |

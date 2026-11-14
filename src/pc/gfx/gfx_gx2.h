@@ -63,6 +63,7 @@ struct WiiUGx2FrameProfile {
 };
 extern struct WiiUGx2FrameProfile gfx_gx2_frame_profile;
 uint64_t gfx_gx2_profile_ticks_to_us(uint64_t ticks);
+size_t gfx_gx2_vbo_reserved_bytes(void);
 #endif
 
 #ifdef __cplusplus

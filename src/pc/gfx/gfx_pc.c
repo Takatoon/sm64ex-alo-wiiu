@@ -22,7 +22,6 @@
 #include "game/game_init.h"
 #include "game/level_update.h"
 #include "game/object_list_processor.h"
-#include "wiiu_geometry_ab.h"
 #include "game/ingame_menu.h"
 #endif
 
@@ -326,6 +325,10 @@ static struct WiiUVertexCache vertex_reuse;
 static uint16_t buf_indices[MAX_BUFFERED_TRIANGLES * 3];
 static size_t buf_unique_vertices;
 static bool buf_vbo_indexed;
+static unsigned buf_triangle_limit = 256;
+#define GFX_TRIANGLE_LIMIT buf_triangle_limit
+#else
+#define GFX_TRIANGLE_LIMIT MAX_BUFFERED_TRIANGLES
 #endif
 
 struct GfxDimensions gfx_current_dimensions;
@@ -410,22 +413,20 @@ static struct {
 } model_geometry_profile;
 
 static bool gfx_profile_interpolated;
-static struct WiiUGeometryAb geometry_ab;
+static bool geometry_profile_awake;
 static bool geometry_ab_measure;
-static unsigned geometry_ab_run, geometry_ab_frames, geometry_ab_windows;
-static bool geometry_manual_indexed = false;
-static bool geometry_manual_toggle;
+static unsigned geometry_buffer_choice, geometry_buffer_steps;
 void gfx_profile_toggle_geometry(void) {
-    geometry_manual_toggle = !geometry_manual_toggle;
+    geometry_buffer_steps = (geometry_buffer_steps + 1) % 3;
 }
 const char *gfx_profile_geometry_indicator(void) {
-    return gfx_gx2_indexed() ? "R B" : "R A";
+    return buf_triangle_limit == 1024 ? "B 1024" :
+           buf_triangle_limit == 512 ? "B 512" : "B 256";
 }
 static void gfx_profile_ab_update(void);
 bool gfx_profile_ab_keep_awake(void) {
-    // Also hold idle during stabilization and after completion, so sleeping
-    // cannot change the view and automatically restart a completed benchmark.
-    return geometry_ab.initialized;
+    // Keep a stationary profiling view from changing when Mario falls asleep.
+    return geometry_profile_awake;
 }
 void gfx_profile_set_interpolated(bool interpolated) {
     gfx_profile_interpolated = interpolated;
@@ -455,7 +456,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
         if (p->frames == 0) continue;
         const char *phase = i ? "interpolated" : "current";
 #define PHASE_AVG(field) (unsigned long long)(p->field / p->frames)
-        WHBLogPrintf("MODEL_PHASE revision=10 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
+        WHBLogPrintf("MODEL_PHASE revision=11 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
             window, level, model, phase, p->frames, p->slow_intervals,
             PHASE_AVG(total_us), (unsigned long long)p->max_total_us,
             PHASE_AVG(pre_us), PHASE_AVG(dl_us), PHASE_AVG(vertex_us),
@@ -464,7 +465,7 @@ static void gfx_profile_report_phases(unsigned window, int level, unsigned model
             PHASE_AVG(present_us), PHASE_AVG(draws), PHASE_AVG(triangles));
 #undef PHASE_AVG
 #define BACKEND_AVG(metric) gfx_profile_avg_ticks(p->backend.ticks[WIIU_GX2_##metric], p->frames)
-        WHBLogPrintf("MODEL_GX2 revision=10 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u avg_ibo_bytes=%llu avg_unique_vertices=%llu indexed_draws=%u",
+        WHBLogPrintf("MODEL_GX2 revision=11 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u avg_ibo_bytes=%llu avg_unique_vertices=%llu indexed_draws=%u",
             window, phase, p->frames,
             BACKEND_AVG(VALIDATE), BACKEND_AVG(STORAGE), BACKEND_AVG(COPY),
             BACKEND_AVG(PUBLISH), BACKEND_AVG(DRAW), BACKEND_AVG(BOUNDARY),
@@ -488,102 +489,28 @@ static void gfx_profile_ab_clear_window(void) {
 }
 
 static void gfx_profile_ab_update(void) {
-#ifndef WIIU_GEOMETRY_AUTO_AB
     static bool announced;
     static unsigned previous_rate;
+    static const unsigned limits[] = {256, 512, 1024};
     const unsigned target_rate = (unsigned)(30.0f * pc_get_render_frame_multiplier());
-    if (geometry_manual_toggle || !announced || target_rate != previous_rate) {
-        if (geometry_manual_toggle) geometry_manual_indexed = !geometry_manual_indexed;
-        geometry_manual_toggle = false;
+    if (geometry_buffer_steps || !announced || target_rate != previous_rate) {
+        geometry_buffer_choice = (geometry_buffer_choice + geometry_buffer_steps) % 3;
+        geometry_buffer_steps = 0;
+        buf_triangle_limit = limits[geometry_buffer_choice];
         gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_AB revision=10 experiment=indexed_geometry control=manual event=select method=%s indicator=%s packed_colors=1 target_fps=%u",
-            geometry_manual_indexed ? "indexed" : "expanded", geometry_manual_indexed ? "B" : "A", target_rate);
+        WHBLogPrintf("MODEL_BUFFER revision=11 experiment=batch_capacity control=manual event=select triangles=%u target_fps=%u packed_colors=1 indexed=1",
+            buf_triangle_limit, target_rate);
         announced = true;
         previous_rate = target_rate;
     }
-    // Apply only before the first image of a pair. Controller events merely
-    // queue the change, so no pending display list sees its layout switched.
+    // Once per logical update, before its first image; no pending GPU work
+    // changes format. The arena retains every previous in-flight batch.
     gfx_gx2_set_packed_colors(true);
-    gfx_gx2_set_indexed(geometry_manual_indexed);
+    gfx_gx2_set_indexed(true);
     geometry_ab_measure = true;
-    geometry_ab.initialized = gCurrentArea != NULL && gMarioState != NULL;
-    return;
-#else
-    static bool anchor_valid;
-    static int level, area;
-    static unsigned model, width, height, gamepad, filtering;
-    static float player[3], camera[3], focus[3];
-    static s16 yaw;
-#ifdef DYNOS
-    unsigned current_model = dynos_active_player_choice();
-#else
-    unsigned current_model = 0;
-#endif
-    bool eligible = gCurrentArea != NULL && gMarioState != NULL &&
-        gMarioState->marioObj != NULL && sCurrPlayMode == PLAY_MODE_NORMAL &&
-        get_dialog_id() == -1;
-#ifdef EXT_OPTIONS_MENU
-    eligible = eligible && !optmenu_open;
-#endif
-    bool changed = !anchor_valid || level != gCurrLevelNum || area != gCurrAreaIndex ||
-        model != current_model || width != gfx_current_dimensions.width ||
-        height != gfx_current_dimensions.height || gamepad != configWiiUGamePadDisplay ||
-        filtering != configFiltering;
-    if (eligible && anchor_valid) {
-        for (unsigned i = 0; i < 3; ++i) {
-            changed |= fabsf(player[i] - gMarioState->pos[i]) > 4.0f ||
-                       fabsf(camera[i] - gLakituState.pos[i]) > 16.0f ||
-                       fabsf(focus[i] - gLakituState.focus[i]) > 16.0f;
-        }
-        changed |= abs((int)(s16)(gLakituState.yaw - yaw)) > 128;
-    }
-    if (eligible && changed) {
-        level = gCurrLevelNum; area = gCurrAreaIndex; model = current_model;
-        width = gfx_current_dimensions.width; height = gfx_current_dimensions.height;
-        gamepad = configWiiUGamePadDisplay; filtering = configFiltering;
-        for (unsigned i = 0; i < 3; ++i) {
-            player[i] = gMarioState->pos[i]; camera[i] = gLakituState.pos[i];
-            focus[i] = gLakituState.focus[i];
-        }
-        yaw = gLakituState.yaw;
-    }
-    anchor_valid = eligible;
-    uint64_t now = osGetTime();
-    unsigned previous_block = geometry_ab.block;
-    bool was_running = geometry_ab.running;
-    enum WiiUAbEvent event = wiiu_geometry_ab_step(&geometry_ab, now, eligible, changed);
-    if ((event == WIIU_AB_RESET && was_running) || event == WIIU_AB_NEXT || event == WIIU_AB_DONE) {
-        unsigned ended = previous_block + 1;
-        WHBLogPrintf("MODEL_AB revision=10 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
-            geometry_ab_run, ended, (ended & 1) ? "expanded" : "indexed", geometry_ab_frames,
-            geometry_ab_windows * 120, (unsigned)gfx_vcutm_profile.frames);
-        geometry_ab_frames = 0;
-        geometry_ab_windows = 0;
-        gfx_profile_ab_clear_window();
-    }
-    if (event == WIIU_AB_RESET) {
-        gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_AB revision=10 event=reset run=%u reason=scene_or_state_changed", geometry_ab_run);
-    }
-    if (event == WIIU_AB_START || event == WIIU_AB_NEXT) {
-        if (event == WIIU_AB_START) ++geometry_ab_run;
-        gfx_profile_ab_clear_window();
-        geometry_ab_frames = 0;
-        WHBLogPrintf("MODEL_AB revision=10 experiment=indexed_geometry event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
-            geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "indexed" : "expanded",
-            level, area, model, width, height, (int)player[0], (int)player[1], (int)player[2],
-            (int)camera[0], (int)camera[1], (int)camera[2]);
-    }
-    if (event == WIIU_AB_DONE)
-        WHBLogPrintf("MODEL_AB revision=10 event=complete run=%u blocks=4", geometry_ab_run);
-    geometry_ab_measure = wiiu_geometry_ab_measure(&geometry_ab, now);
-    // Previous pair has completed; select a matching immutable fetch program
-    // before either image of the next pair is submitted.
-    gfx_gx2_set_packed_colors(true);
-    gfx_gx2_set_indexed(wiiu_geometry_ab_alternate(&geometry_ab));
-#endif
+    geometry_profile_awake = gCurrentArea != NULL && gMarioState != NULL;
 }
+
 #endif
 
 static void gfx_flush(void) {
@@ -592,7 +519,7 @@ static void gfx_flush(void) {
         gfx_vcutm_profile.draw_calls++;
         gfx_vcutm_profile.triangles += (uint32_t) buf_vbo_num_tris;
         const uint64_t submit_begin_us = osGetTime();
-        if (buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES)
+        if (buf_vbo_num_tris == GFX_TRIANGLE_LIMIT)
             ++model_geometry_profile.full_flushes;
 #endif
 #ifdef TARGET_WII_U
@@ -1783,7 +1710,7 @@ retry_texture_bindings:;
         // Acquire only after all material/texture changes have flushed. No
         // backend work can move this reservation while the batch is filled.
         float *direct = gfx_rapi == &gfx_gx2_api
-            ? gfx_gx2_reserve_vertices(VERTEX_BUFFER_SIZE) : NULL;
+            ? gfx_gx2_reserve_vertices((size_t)GFX_TRIANGLE_LIMIT * 28 * 3) : NULL;
         buf_vbo = direct != NULL ? direct : buf_vbo_fallback;
     }
 #endif
@@ -1828,7 +1755,7 @@ retry_texture_bindings:;
 #undef GFX_PREPARED_MATERIAL
 #endif
     }
-    if (++buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES) {
+    if (++buf_vbo_num_tris == GFX_TRIANGLE_LIMIT) {
         gfx_flush();
     }
 }
@@ -2941,7 +2868,6 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
         memset(model_phase_profile, 0, sizeof(model_phase_profile));
         return;
     }
-    ++geometry_ab_frames;
 
     const uint64_t total_us = present_end_us - gfx_vcutm_profile.frame_begin_us;
     const uint64_t pre_submit_us = gfx_vcutm_profile.run_begin_us - gfx_vcutm_profile.frame_begin_us;
@@ -3043,16 +2969,11 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
         const uint64_t fps_x1000 = gfx_vcutm_profile.interval_sum_us != 0
             ? (uint64_t) gfx_vcutm_profile.interval_count * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
         gfx_vcutm_window_sequence++;
-        ++geometry_ab_windows;
-#ifdef WIIU_GEOMETRY_AUTO_AB
-        WHBLogPrintf("MODEL_AB_WINDOW revision=10 experiment=indexed_geometry window=%u run=%u block=%u method=%s",
-            (unsigned)gfx_vcutm_window_sequence, geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "indexed" : "expanded");
-#else
-        WHBLogPrintf("MODEL_INDEX_WINDOW revision=10 control=manual window=%u method=%s packed_colors=1",
-            (unsigned)gfx_vcutm_window_sequence, gfx_gx2_indexed() ? "indexed" : "expanded");
-#endif
-        WHBLogPrintf("MODEL_GEOMETRY revision=10 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
+        WHBLogPrintf("MODEL_BUFFER_WINDOW revision=11 control=manual window=%u triangles=%u target_fps=%u packed_colors=1 indexed=1 pool_bytes=%llu",
+            (unsigned)gfx_vcutm_window_sequence, buf_triangle_limit,
+            (unsigned)(30.0f * pc_get_render_frame_multiplier()),
+            (unsigned long long)gfx_gx2_vbo_reserved_bytes());
+        WHBLogPrintf("MODEL_GEOMETRY revision=11 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
                      (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
                      (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
                      (unsigned long long) (model_geometry_profile.submit_sum_us / 120),

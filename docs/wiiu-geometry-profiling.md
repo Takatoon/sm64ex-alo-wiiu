@@ -749,3 +749,47 @@ coordinates from B; do not present their difference as an isolated A/B gain.
 The earlier ~15 FPS Render96 observation is likewise not a matched comparison.
 The extended visual feedback supports retaining the indexed implementation;
 complete asset/material coverage has not been established by playing briefly.
+
+
+## Runtime frame rate and batch-capacity trial (revision 11)
+
+The 30/60 FPS implementation is recovered selectively from the local video-mode
+worktree, without importing its unrelated audio/renderer experiments. Commit
+`05cb8bfe` adds the saved `frame_rate` choice to Display. It captures the active
+rate for an entire logical update and applies a requested change only after
+that update's images complete. Runtime 30 suppresses the midpoint submission,
+patches the retained list to its current logical transforms and renders once.
+Runtime 60 renders the original interpolated/current pair. Both update game
+logic and audio once. GX2 swap intervals are 2 and 1 respectively; the FPS
+counter uses the active multiplier. Native 30 builds remain fixed at 30.
+The profiler begins once per logical update in both modes. Slow/spike thresholds
+scale with the intended frame duration, and windows clear on a rate change.
+
+The new trial holds RGBA8 and indexed B fixed and cycles the batch limit
+256 -> 512 -> 1024 -> 256 on standalone Minus release. The HUD shows `B 256`,
+`B 512`, `B 1024`; queued changes apply only at the next logical-update boundary.
+There is no timer or geometry-method toggle. DynOS Minus-direction chords
+remain separate. `MODEL_BUFFER` and `MODEL_BUFFER_WINDOW` identify the active
+limit and target FPS. At 30 there is only a current-phase record per window;
+120 images take about four seconds. Do not combine 30/60 measurements.
+
+Wii U storage capacity grows to 1024 triangles (336 KiB float fallback and
+6 KiB index scratch), but each direct reservation uses the active limit,
+retaining the original 256 reservation size for that comparison. The vertex
+reuse cache is still 68 slots, and uint16 indices cover all 3072 possible
+references. Material changes, reload invalidation, culling, order, draw-time
+publication and arena retirement remain as before. `pool_bytes` reports the
+arena's retained allocated capacity, not only current-frame usage; the pool
+keeps its high-water capacity after switching back to a smaller limit.
+
+Validation includes real dispatch tests for native 30 and runtime 30/60,
+mid-update changes, current-state rendering at 30, one audio/game update,
+pacing/clamping and the live FPS counter. The gesture/overlay test checks
+three-way cycling, queued multiple presses, frame-rate window resets,
+held keys, disconnects and model-selection chords. Geometry comparisons use
+matching reference batch limits and 2300-triangle sequences across 240 state
+scenarios: all three limits retain byte-identical expanded output/order,
+including capacity flushes, partial vertex reloads and LOD changes. The 1024
+case passes both fast math and address/undefined-behavior sanitizers. Backend
+lifetime/resource checks and the profiling WUHB build pass. Console results
+for revision 11 are still pending.
