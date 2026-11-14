@@ -302,8 +302,6 @@ static struct RenderingState {
     struct TextureHashmapNode *textures[2];
 } rendering_state;
 
-
-
 #ifdef TARGET_WII_U
 // Reuse material setup across triangle/vertex commands. The DL dispatcher
 // invalidates this on every other command, including nested display lists.
@@ -313,6 +311,9 @@ static struct {
     uint8_t num_inputs;
     bool use_alpha, use_fog, use_texture, z_is_from_0_to_1;
     uint32_t tex_width, tex_height;
+    bool attributes_valid, needs_lod;
+    uint8_t rgb_kind[4], alpha_kind[4];
+    float constant_rgb[4][3], constant_alpha[4], fog_rgb[3];
 } triangle_state;
 #endif
 
@@ -512,7 +513,7 @@ static void gfx_profile_ab_update(void) {
     if ((event == WIIU_AB_RESET && was_running) || event == WIIU_AB_NEXT || event == WIIU_AB_DONE) {
         unsigned ended = previous_block + 1;
         WHBLogPrintf("MODEL_AB revision=7 event=block_end run=%u block=%u method=%s measured_frames=%u reported_frames=%u partial_frames=%u",
-            geometry_ab_run, ended, (ended & 1) ? "baseline" : "baseline", geometry_ab_frames,
+            geometry_ab_run, ended, (ended & 1) ? "baseline" : "prepared_material", geometry_ab_frames,
             geometry_ab_windows * 120, (unsigned)gfx_vcutm_profile.frames);
         geometry_ab_frames = 0;
         geometry_ab_windows = 0;
@@ -526,9 +527,9 @@ static void gfx_profile_ab_update(void) {
         if (event == WIIU_AB_START) ++geometry_ab_run;
         gfx_profile_ab_clear_window();
         geometry_ab_frames = 0;
-        WHBLogPrintf("MODEL_AB revision=7 experiment=baseline_profile event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
+        WHBLogPrintf("MODEL_AB revision=7 experiment=prepared_material event=block_start run=%u block=%u method=%s direct_storage=1 duration_ms=20000 discard_ms=1000 keep_awake=1 level=%d area=%d model=%u width=%u height=%u mario=%d,%d,%d camera=%d,%d,%d",
             geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "baseline" : "baseline",
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "prepared_material" : "baseline",
             level, area, model, width, height, (int)player[0], (int)player[1], (int)player[2],
             (int)camera[0], (int)camera[1], (int)camera[2]);
     }
@@ -1505,6 +1506,38 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
 #endif
 }
 
+#ifdef TARGET_WII_U
+static void gfx_prepare_material_values(struct ColorCombiner *comb, uint8_t num_inputs,
+        bool use_alpha, bool use_fog) {
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+    ++model_geometry_profile.uniform_prepares;
+#endif
+    triangle_state.needs_lod = false;
+    for (unsigned j = 0; j < num_inputs; ++j) {
+        uint8_t rgb = comb->shader_input_mapping[0][j];
+        uint8_t alpha = comb->shader_input_mapping[1][j];
+        triangle_state.rgb_kind[j] = rgb;
+        triangle_state.alpha_kind[j] = alpha;
+        const struct RGBA *color = rgb == CC_PRIM ? &rdp.prim_color :
+                                   rgb == CC_ENV ? &rdp.env_color : NULL;
+        triangle_state.constant_rgb[j][0] = color ? color->r / 255.0f : 0.0f;
+        triangle_state.constant_rgb[j][1] = color ? color->g / 255.0f : 0.0f;
+        triangle_state.constant_rgb[j][2] = color ? color->b / 255.0f : 0.0f;
+        if (use_alpha) {
+            color = alpha == CC_PRIM ? &rdp.prim_color :
+                    alpha == CC_ENV ? &rdp.env_color : NULL;
+            triangle_state.constant_alpha[j] = color ? color->a / 255.0f : 0.0f;
+        }
+        triangle_state.needs_lod |= rgb == CC_LOD || (use_alpha && alpha == CC_LOD);
+    }
+    if (use_fog) {
+        triangle_state.fog_rgb[0] = rdp.fog_color.r / 255.0f;
+        triangle_state.fog_rgb[1] = rdp.fog_color.g / 255.0f;
+        triangle_state.fog_rgb[2] = rdp.fog_color.b / 255.0f;
+    }
+    triangle_state.attributes_valid = true;
+}
+#endif
 
 static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     struct LoadedVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
@@ -1551,6 +1584,7 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     uint32_t tex_width, tex_height;
 #ifdef TARGET_WII_U
     if (!triangle_state.valid) {
+        triangle_state.attributes_valid = false;
 #endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     ++model_geometry_profile.material_prepares;
@@ -1692,97 +1726,25 @@ retry_texture_bindings:;
         buf_vbo = direct != NULL ? direct : buf_vbo_fallback;
     }
 #endif
-    for (int i = 0; i < 3; i++) {
-        float z = v_arr[i]->z, w = v_arr[i]->w;
-        if (z_is_from_0_to_1) {
-            z = (z + w) / 2.0f;
-        }
-
-        buf_vbo[buf_vbo_len++] = v_arr[i]->x;
-        buf_vbo[buf_vbo_len++] = v_arr[i]->y;
-#ifdef TARGET_N3DS
-        buf_vbo[buf_vbo_len++] = -z;
-#else
-        buf_vbo[buf_vbo_len++] = z;
-#endif
-        buf_vbo[buf_vbo_len++] = w;
-
-        if (use_texture) {
-            float u = (v_arr[i]->u - rdp.texture_tile.uls * 8) / 32.0f;
-            float v = (v_arr[i]->v - rdp.texture_tile.ult * 8) / 32.0f;
-            if ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT) {
-                // Linear filter adds 0.5f to the coordinates
-                u += 0.5f;
-                v += 0.5f;
-            }
-            buf_vbo[buf_vbo_len++] = u / tex_width;
-            buf_vbo[buf_vbo_len++] = v / tex_height;
 #ifdef TARGET_WII_U
-            // Padding for faster GPU reading
-            buf_vbo[buf_vbo_len++] = 0.0f;
-            buf_vbo[buf_vbo_len++] = 0.0f;
+    bool use_prepared_material = true;
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+    use_prepared_material = wiiu_geometry_ab_alternate(&geometry_ab);
 #endif
-        }
-#ifndef TARGET_N3DS
-        if (use_fog) {
-            buf_vbo[buf_vbo_len++] = rdp.fog_color.r / 255.0f;
-            buf_vbo[buf_vbo_len++] = rdp.fog_color.g / 255.0f;
-            buf_vbo[buf_vbo_len++] = rdp.fog_color.b / 255.0f;
-            buf_vbo[buf_vbo_len++] = v_arr[i]->color.a / 255.0f; // fog factor (not alpha)
-        }
+    if (use_prepared_material) {
+        if (!triangle_state.attributes_valid)
+            gfx_prepare_material_values(comb, num_inputs, use_alpha, use_fog);
+#define GFX_PREPARED_MATERIAL
+#define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#include "gfx_triangle_emit.inc.h"
+#undef EMIT_FLOAT
+#undef GFX_PREPARED_MATERIAL
+    } else
 #endif
-        for (int j = 0; j < num_inputs; j++) {
-            struct RGBA *color;
-            struct RGBA tmp;
-            for (int k = 0; k < 1 + (use_alpha ? 1 : 0); k++) {
-                switch (comb->shader_input_mapping[k][j]) {
-                    case CC_PRIM:
-                        color = &rdp.prim_color;
-                        break;
-                    case CC_SHADE:
-                        color = &v_arr[i]->color;
-                        break;
-                    case CC_ENV:
-                        color = &rdp.env_color;
-                        break;
-                    case CC_LOD:
-                    {
-                        float distance_frac = (v1->w - 3000.0f) / 3000.0f;
-                        if (distance_frac < 0.0f) distance_frac = 0.0f;
-                        if (distance_frac > 1.0f) distance_frac = 1.0f;
-                        tmp.r = tmp.g = tmp.b = tmp.a = distance_frac * 255.0f;
-                        color = &tmp;
-                        break;
-                    }
-                    default:
-                        memset(&tmp, 0, sizeof(tmp));
-                        color = &tmp;
-                        break;
-                }
-                if (k == 0) {
-                    buf_vbo[buf_vbo_len++] = color->r / 255.0f;
-                    buf_vbo[buf_vbo_len++] = color->g / 255.0f;
-                    buf_vbo[buf_vbo_len++] = color->b / 255.0f;
-#ifdef TARGET_WII_U
-                    if (!use_alpha) {
-                        buf_vbo[buf_vbo_len++] = 1.0f;
-                    }
-#endif
-                } else {
-                    if (use_fog && color == &v_arr[i]->color) {
-                        // Shade alpha is 100% for fog
-                        buf_vbo[buf_vbo_len++] = 1.0f;
-                    } else {
-                        buf_vbo[buf_vbo_len++] = color->a / 255.0f;
-                    }
-                }
-            }
-        }
-        /*struct RGBA *color = &v_arr[i]->color;
-        buf_vbo[buf_vbo_len++] = color->r / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->g / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->b / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->a / 255.0f;*/
+    {
+#define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#include "gfx_triangle_emit.inc.h"
+#undef EMIT_FLOAT
     }
     if (++buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES) {
         gfx_flush();
@@ -2988,9 +2950,9 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
             ? (uint64_t) gfx_vcutm_profile.interval_count * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
         gfx_vcutm_window_sequence++;
         ++geometry_ab_windows;
-        WHBLogPrintf("MODEL_AB_WINDOW revision=7 experiment=baseline_profile window=%u run=%u block=%u method=%s",
+        WHBLogPrintf("MODEL_AB_WINDOW revision=7 experiment=prepared_material window=%u run=%u block=%u method=%s",
             (unsigned)gfx_vcutm_window_sequence, geometry_ab_run, geometry_ab.block + 1,
-            wiiu_geometry_ab_alternate(&geometry_ab) ? "baseline" : "baseline");
+            wiiu_geometry_ab_alternate(&geometry_ab) ? "prepared_material" : "baseline");
         WHBLogPrintf("MODEL_GEOMETRY revision=7 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
                      (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
                      (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
