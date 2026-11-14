@@ -61,8 +61,10 @@ agua y fuego. Sigue siendo una comprobación parcial de RGBA8.
   20 s en B y repetir A/B. Los cambios de nivel o modelo no se contabilizan
   como rendimiento estable. Comparar tanto una vista ligera como una lenta.
 - Los registros incluyen vértices realmente enviados, bytes de vértices e
-  índices, y número de dibujos indexados. No hay aún resultados en consola
-  del nuevo método; las pruebas de equivalencia no predicen FPS.
+  índices, y número de dibujos indexados. Primera comparación en la misma
+  vista lenta con Galaxy: **39,96 -> 59,44 FPS**, preparación **6,128 ->
+  5,279 ms** y datos totales **269 -> 138 KB** por imagen. En la vista inicial
+  ambos rondan 59,44 FPS. Falta ampliar las pruebas visuales y repetir A/B.
 - Fuera de la compilación de perfilado, el dibujo indexado sigue desactivado
   mientras se valida. RGBA8 sí queda activado.
 
@@ -87,7 +89,7 @@ las compilaciones anteriores para sustituirlo desde el mismo icono.
 | --- | --- | --- |
 | 1 | Medir A/B de geometría indexada. | Misma cámara y modelo en A/B/A/B; comparar preparación total, vértices enviados, bytes incluyendo índices y FPS. RGBA8 fijo. |
 | 2 | Validar la caché de vértices preparados en consola. | Ya forma parte de B. Comprobar iluminación, niebla, texturas generadas, cambios de material y distintos modelos. |
-| 3 | Consolidar o descartar el dibujo indexado según las mediciones. | La equivalencia automatizada pasa; falta comprobar apariencia y rendimiento reales. |
+| 3 | Consolidar o descartar el dibujo indexado según las mediciones. | La equivalencia y las primeras pruebas en consola pasan. Ampliar la validación visual y repetir las mediciones; Render96 aún no tiene un A comparable. |
 | 4 | Medir el coste gráfico del castillo por material/capa. | Usar mediciones de GPU; la duración de `GX2DrawDone` es una espera de la CPU, no una medida aislada del trabajo de GPU. Separar coste de escena y del modelo. |
 | 5 | Revisar el relleno y la alineación del formato de vértice. | Verificar si reducir bytes de UV compensa: el relleno existente es deliberado y quitarlo puede perjudicar las lecturas de la GPU. |
 | 6 | Transformación e iluminación de vértices más eficientes. | Perfilar sus operaciones y contrastar el código generado por el compilador de PowerPC. Validar redondeo, luces, niebla y recorte. |

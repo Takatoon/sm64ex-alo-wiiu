@@ -687,5 +687,38 @@ Validation:
 - Manual A/B and live overlay tests, texture-cache/resource tests and shutdown
   tests pass. The profiling Wii U WUHB builds successfully.
 
-Actual GPU rendering and FPS benefit of B await hardware testing. The HMC/BBH
-floor-selection correction and minimap rebuild diagnostics are included too.
+The HMC/BBH floor-selection correction and minimap rebuild diagnostics are
+included too. Initial hardware results follow; broader visual checks are pending.
+
+
+## First indexed-geometry console results
+
+Snapshot `../sm64ex-alo/logs/wiiu/galaxy-indexed-session-20261114.log`,
+parsed records `../sm64ex-alo/logs/wiiu/galaxy-indexed-analysis-20261114.json`.
+The revision-10 subset contains no invalid-geometry warnings or exceptions.
+The user reports B looks correct in the initial scene and improves performance,
+including subjectively with Render96 HD. These are preliminary visual checks.
+
+Both comparable scenes use Galaxy (choice 4) in castle grounds (level 16),
+with identical reported Mario/camera coordinates and yaw, and no runtime
+texture loads in the selected windows. Medians:
+
+| View | A -> B FPS | A -> B whole DL | A -> B vertex + index bytes/image |
+| --- | --- | --- | --- |
+| Initial; Mario -1328,260,4664; camera -1328,485,5327 | 59.444 -> 59.444 | 6.294 -> 5.423 ms | 277,465 -> 143,781 |
+| Slow; Mario -851,280,3306; camera -1015,485,3961 | 39.960 -> 59.444 | 6.128 -> 5.279 ms | 269,192 -> 138,368 |
+
+The slow view compares A windows 40–48 against B windows 49–107. Triangle
+counts remain ~2532/2533 per image; submitted vertices fall ~7598 -> 3481.
+That is ~0.85 ms / 13.9% less CPU display-list preparation and ~48.6% fewer
+vertex+index bytes. The initial view is display-limited on both methods but
+shows a similar ~0.87 ms preparation saving. These are one-camera comparisons,
+not a guarantee of 60 FPS in every scene or a completed repeated A/B/A/B trial.
+GPU reuse is possible but has not been isolated with GPU timestamp queries.
+
+Render96 (choice 5) has only three B windows in this snapshot, with no
+matching A sample, so no quantitative Render96 gain is attributed yet.
+Continue visual validation in B while moving, changing materials/effects,
+entering areas, holding objects and collecting stars; switch to A at the
+same position if an anomaly appears. The known Galaxy metal-cap issue remains
+outside this trial's scope at the user's request.
