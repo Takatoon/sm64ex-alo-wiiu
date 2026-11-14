@@ -304,6 +304,18 @@ static struct RenderingState {
 
 
 
+#ifdef TARGET_WII_U
+// Reuse material setup across triangle/vertex commands. The DL dispatcher
+// invalidates this on every other command, including nested display lists.
+static struct {
+    bool valid;
+    struct ColorCombiner *comb;
+    uint8_t num_inputs;
+    bool use_alpha, use_fog, use_texture, z_is_from_0_to_1;
+    uint32_t tex_width, tex_height;
+} triangle_state;
+#endif
+
 struct GfxDimensions gfx_current_dimensions;
 
 static bool dropped_frame;
@@ -1533,6 +1545,16 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         }
     }
 
+    struct ColorCombiner *comb;
+    uint8_t num_inputs;
+    bool use_alpha, use_fog, use_texture, z_is_from_0_to_1;
+    uint32_t tex_width, tex_height;
+#ifdef TARGET_WII_U
+    if (!triangle_state.valid) {
+#endif
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    ++model_geometry_profile.material_prepares;
+#endif
     bool depth_test = (rsp.geometry_mode & G_ZBUFFER) == G_ZBUFFER;
     if (depth_test != rendering_state.depth_test) {
         gfx_flush();
@@ -1570,8 +1592,8 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
 
     uint32_t cc_id = rdp.combine_mode;
 
-    bool use_alpha = (rdp.other_mode_l & (G_BL_A_MEM << 18)) == 0;
-    bool use_fog = (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
+    use_alpha = (rdp.other_mode_l & (G_BL_A_MEM << 18)) == 0;
+    use_fog = (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
     bool texture_edge = (rdp.other_mode_l & CVG_X_ALPHA) == CVG_X_ALPHA;
     bool use_noise = (rdp.other_mode_l & G_AC_DITHER) == G_AC_DITHER;
 
@@ -1588,7 +1610,7 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         cc_id &= ~0xfff000;
     }
 
-    struct ColorCombiner *comb = gfx_lookup_or_create_color_combiner(cc_id);
+    comb = gfx_lookup_or_create_color_combiner(cc_id);
     struct ShaderProgram *prg = comb->prg;
     if (prg != rendering_state.shader_program) {
         gfx_flush();
@@ -1601,7 +1623,6 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         gfx_rapi->set_use_alpha(use_alpha);
         rendering_state.alpha_blend = use_alpha;
     }
-    uint8_t num_inputs;
     bool used_textures[2];
     gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
 
@@ -1635,11 +1656,32 @@ retry_texture_bindings:;
     if (texture_generation != gfx_texture_cache_generation) goto retry_texture_bindings;
 #endif
 
-    bool use_texture = used_textures[0] || used_textures[1];
-    uint32_t tex_width = (rdp.texture_tile.lrs - rdp.texture_tile.uls + 4) / 4;
-    uint32_t tex_height = (rdp.texture_tile.lrt - rdp.texture_tile.ult + 4) / 4;
+    use_texture = used_textures[0] || used_textures[1];
+    tex_width = (rdp.texture_tile.lrs - rdp.texture_tile.uls + 4) / 4;
+    tex_height = (rdp.texture_tile.lrt - rdp.texture_tile.ult + 4) / 4;
 
-    bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
+    z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
+#ifdef TARGET_WII_U
+        triangle_state.comb = comb;
+        triangle_state.num_inputs = num_inputs;
+        triangle_state.use_alpha = use_alpha;
+        triangle_state.use_fog = use_fog;
+        triangle_state.use_texture = use_texture;
+        triangle_state.tex_width = tex_width;
+        triangle_state.tex_height = tex_height;
+        triangle_state.z_is_from_0_to_1 = z_is_from_0_to_1;
+        triangle_state.valid = true;
+    } else {
+        comb = triangle_state.comb;
+        num_inputs = triangle_state.num_inputs;
+        use_alpha = triangle_state.use_alpha;
+        use_fog = triangle_state.use_fog;
+        use_texture = triangle_state.use_texture;
+        tex_width = triangle_state.tex_width;
+        tex_height = triangle_state.tex_height;
+        z_is_from_0_to_1 = triangle_state.z_is_from_0_to_1;
+    }
+#endif
 
     for (int i = 0; i < 3; i++) {
         float z = v_arr[i]->z, w = v_arr[i]->w;
@@ -2007,6 +2049,9 @@ static void gfx_dp_set_fill_color(uint32_t packed_color) {
 }
 
 static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry) {
+#ifdef TARGET_WII_U
+    triangle_state.valid = false;
+#endif
     uint32_t saved_other_mode_h = rdp.other_mode_h;
     uint32_t cycle_type = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE));
 
@@ -2072,6 +2117,10 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
     if (cycle_type == G_CYC_COPY) {
         rdp.other_mode_h = saved_other_mode_h;
     }
+#ifdef TARGET_WII_U
+    // The rectangle temporarily changes geometry mode, viewport and filtering.
+    triangle_state.valid = false;
+#endif
 }
 
 static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, UNUSED uint8_t tile, int16_t uls, int16_t ult, int16_t dsdx, int16_t dtdy, bool flip) {
@@ -2180,6 +2229,17 @@ static void gfx_run_dl(Gfx* cmd) {
     //int dummy = 0;
     for (;;) {
         uint32_t opcode = cmd->words.w0 >> 24;
+#ifdef TARGET_WII_U
+        // Only vertex loads and triangles leave all material state unchanged.
+        // Invalidate conservatively for everything else, even unknown opcodes.
+        if (opcode != G_VTX && opcode != (uint8_t)G_TRI1
+#if defined(F3DEX_GBI) || defined(F3DLP_GBI)
+            && opcode != (uint8_t)G_TRI2
+#endif
+        ) {
+            triangle_state.valid = false;
+        }
+#endif
 
 #if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
         if (gfx_wiiu_skip_to_options_menu) {
@@ -2757,6 +2817,9 @@ void gfx_start_frame(void) {
 }
 
 void gfx_run(Gfx *commands) {
+#ifdef TARGET_WII_U
+    triangle_state.valid = false;
+#endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     gfx_vcutm_profile.run_begin_us = osGetTime();
 #endif
