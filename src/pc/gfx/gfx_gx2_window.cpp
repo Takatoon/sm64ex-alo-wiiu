@@ -139,6 +139,20 @@ static bool g_minimap_textures_preloaded = false;
 static MEMHeapHandle    g_mem1_heap_handle        = nullptr;
 static MEMHeapHandle    g_fg_heap_handle          = nullptr;
 
+void gfx_gx2_set_frame_rate(unsigned int frame_rate)
+{
+#ifdef HIGH_FPS_PC
+    configWiiUFrameRate = frame_rate < WIIU_FRAME_RATE_COUNT
+        ? frame_rate : WIIU_FRAME_RATE_60;
+#else
+    configWiiUFrameRate = WIIU_FRAME_RATE_30;
+#endif
+    uint32_t interval = configWiiUFrameRate == WIIU_FRAME_RATE_60 ? 1 : 2;
+    GX2SetSwapInterval(interval);
+    WHBLogPrintf("[present] frame rate: %u FPS (swap interval %u)",
+                 configWiiUFrameRate == WIIU_FRAME_RATE_60 ? 60 : 30, interval);
+}
+
 static void gfx_gx2_window_foreground_release_callback(void)
 {
     //WHBLogPrint("To release foreground");
@@ -1865,13 +1879,7 @@ static void gfx_gx2_window_init(UNUSED const char*)
     GX2SetColorBuffer(&g_color_buffer, GX2_RENDER_TARGET_0);
     GX2SetDepthBuffer(&g_depth_buffer);
 
-    // Set swap interval to 2 by default
-    // (Set it to 1 when using the 60FPS patch)
-#ifdef HIGH_FPS_PC
-    GX2SetSwapInterval(1);
-#else
-    GX2SetSwapInterval(2);
-#endif
+    gfx_gx2_set_frame_rate(configWiiUFrameRate);
 
     // Set the default viewport and scissor
     GX2SetViewport(g_render_offset_x, g_render_offset_y,

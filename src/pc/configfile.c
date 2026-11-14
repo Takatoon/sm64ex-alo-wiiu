@@ -68,6 +68,11 @@ unsigned int configWiiUGamePadDisplay = WIIU_GAMEPAD_MIRROR_TV;
 #endif
 unsigned int configWiiUInternalResolution = WIIU_RESOLUTION_AUTO;
 unsigned int configWiiUAspectRatio = WIIU_ASPECT_RATIO_16_9;
+#ifdef HIGH_FPS_PC
+unsigned int configWiiUFrameRate = WIIU_FRAME_RATE_60;
+#else
+unsigned int configWiiUFrameRate = WIIU_FRAME_RATE_30;
+#endif
 #endif
 unsigned int configMasterVolume = MAX_VOLUME; // 0 - MAX_VOLUME
 unsigned int configMusicVolume = MAX_VOLUME;
@@ -168,6 +173,7 @@ static const struct ConfigOption options[] = {
     {.name = "gamepad_display",      .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUGamePadDisplay},
 #endif
     {.name = "aspect_ratio",         .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUAspectRatio},
+    {.name = "frame_rate",           .type = CONFIG_TYPE_UINT, .uintValue = &configWiiUFrameRate},
 #endif
     {.name = "master_volume",        .type = CONFIG_TYPE_UINT, .uintValue = &configMasterVolume},
     {.name = "music_volume",         .type = CONFIG_TYPE_UINT, .uintValue = &configMusicVolume},

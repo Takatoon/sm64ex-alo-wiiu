@@ -27,6 +27,7 @@ static struct WiiUGeometryAb geometry_ab;
 static void *gCurrentArea=(void *)1,*gMarioState=(void *)1;
 static bool packed,indexed;
 static unsigned resets,logs;
+static float pc_get_render_frame_multiplier(void) { return 2.0f; }
 static void gfx_profile_ab_clear_window(void) { ++resets; }
 static void WHBLogPrintf(const char *fmt,...) { (void)fmt;++logs; }
 static void gfx_gx2_set_packed_colors(bool enable) { packed=enable; }

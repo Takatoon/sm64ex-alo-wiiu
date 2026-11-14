@@ -15,6 +15,7 @@ extern uint32_t g_window_width;
 extern uint32_t g_window_height;
 extern uint32_t g_render_offset_x;
 extern uint32_t g_render_offset_y;
+void gfx_gx2_set_frame_rate(unsigned int frame_rate);
 
 void gfx_gx2_free_vbo(void);
 /* Render thread only. Uncommitted space for one frontend batch; submit through

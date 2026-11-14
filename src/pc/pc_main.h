@@ -7,6 +7,7 @@ extern "C" {
 
 void game_deinit(void);
 void game_exit(void);
+float pc_get_render_frame_multiplier(void);
 
 #ifdef __cplusplus
 }

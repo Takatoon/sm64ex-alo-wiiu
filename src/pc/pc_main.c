@@ -102,9 +102,29 @@ void set_vblank_handler(UNUSED s32 index, UNUSED struct VblankHandler *handler, 
 
 static bool inited = false;
 
+#if defined(TARGET_WII_U) && defined(HIGH_FPS_PC)
+static bool sSuppressDisplayListExecution;
+static unsigned int sActiveWiiUFrameRate = WIIU_FRAME_RATE_60;
+#endif
+
+float pc_get_render_frame_multiplier(void) {
+#ifdef HIGH_FPS_PC
+#ifdef TARGET_WII_U
+    return sActiveWiiUFrameRate == WIIU_FRAME_RATE_60 ? 2.0f : 1.0f;
+#else
+    return 2.0f;
+#endif
+#else
+    return 1.0f;
+#endif
+}
+
 #include "game/game_init.h" // for gGlobalTimer
 void exec_display_list(struct SPTask *spTask) {
     if (!inited) return;
+#if defined(TARGET_WII_U) && defined(HIGH_FPS_PC)
+    if (sSuppressDisplayListExecution) return;
+#endif
     gfx_run((Gfx *)spTask->task.t.data_ptr);
 }
 
@@ -171,12 +191,19 @@ void produce_one_frame(void) {
 #ifdef DYNOS
     dynos_update();
 #endif
+#ifdef HIGH_FPS_PC
+    bool render_interpolated_pair = true;
+#ifdef TARGET_WII_U
+    render_interpolated_pair = sActiveWiiUFrameRate == WIIU_FRAME_RATE_60;
+    sSuppressDisplayListExecution = !render_interpolated_pair;
+#endif
+#endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     // The first list contains interpolated transforms; patching restores current.
 #ifdef HIGH_FPS_PC
-    gfx_profile_set_interpolated(true);
+    gfx_profile_begin_tick(render_interpolated_pair);
 #else
-    gfx_profile_set_interpolated(false);
+    gfx_profile_begin_tick(false);
 #endif
 #endif
     gfx_start_frame();
@@ -184,6 +211,15 @@ void produce_one_frame(void) {
     change_audio_volumes();
 
     game_loop_one_iteration();
+#if defined(TARGET_WII_U) && defined(HIGH_FPS_PC)
+    if (!render_interpolated_pair) {
+        // HIGH_FPS_PC first builds a midpoint image. Render the retained
+        // display list only after restoring its current logical transforms.
+        sSuppressDisplayListExecution = false;
+        patch_interpolations();
+        exec_display_list(gGfxSPTask);
+    }
+#endif
 #ifdef RUMBLE_FEEDBACK
     thread6_rumble_loop(NULL);
 #endif
@@ -196,6 +232,7 @@ void produce_one_frame(void) {
     gfx_end_frame();
 
 #ifdef HIGH_FPS_PC
+    if (render_interpolated_pair) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     gfx_profile_set_interpolated(false);
 #endif
@@ -203,6 +240,17 @@ void produce_one_frame(void) {
     patch_interpolations();
     exec_display_list(gGfxSPTask);
     gfx_end_frame();
+    }
+#endif
+
+#if defined(TARGET_WII_U) && defined(HIGH_FPS_PC)
+    unsigned int requested_frame_rate = configWiiUFrameRate < WIIU_FRAME_RATE_COUNT
+        ? configWiiUFrameRate : WIIU_FRAME_RATE_60;
+    configWiiUFrameRate = requested_frame_rate;
+    if (requested_frame_rate != sActiveWiiUFrameRate) {
+        sActiveWiiUFrameRate = requested_frame_rate;
+        gfx_gx2_set_frame_rate(sActiveWiiUFrameRate);
+    }
 #endif
 
 #if defined(TARGET_N3DS) && !defined(DISABLE_N3DS_AUDIO)
@@ -348,6 +396,12 @@ void main_func(void) {
 
     #ifndef TARGET_N3DS
     configfile_load(configfile_name());
+    #endif
+
+    #if defined(TARGET_WII_U) && defined(HIGH_FPS_PC)
+    configWiiUFrameRate = configWiiUFrameRate < WIIU_FRAME_RATE_COUNT
+        ? configWiiUFrameRate : WIIU_FRAME_RATE_60;
+    sActiveWiiUFrameRate = configWiiUFrameRate;
     #endif
 
     #ifdef TARGET_WII_U

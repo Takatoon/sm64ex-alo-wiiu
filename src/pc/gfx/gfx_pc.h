@@ -34,6 +34,7 @@ void gfx_precache_startup_textures(void);
 void gfx_precache_level_textures(s16 level_num);
 #ifdef WIIU_LOAD_TIMING_PROFILE
 void gfx_profile_set_interpolated(bool interpolated);
+void gfx_profile_begin_tick(bool interpolated);
 bool gfx_profile_ab_keep_awake(void);
 void gfx_profile_toggle_geometry(void);
 const char *gfx_profile_geometry_indicator(void);

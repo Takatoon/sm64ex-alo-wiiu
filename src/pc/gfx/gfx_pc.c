@@ -65,6 +65,9 @@
 
 #include "../platform.h"
 #include "../configfile.h"
+#ifdef TARGET_WII_U
+#include "../pc_main.h"
+#endif
 #include "../fs/fs.h"
 
 #include "macros.h"
@@ -425,12 +428,11 @@ bool gfx_profile_ab_keep_awake(void) {
     return geometry_ab.initialized;
 }
 void gfx_profile_set_interpolated(bool interpolated) {
-#ifdef HIGH_FPS_PC
-    if (interpolated) gfx_profile_ab_update();
-#else
-    gfx_profile_ab_update();
-#endif
     gfx_profile_interpolated = interpolated;
+}
+void gfx_profile_begin_tick(bool interpolated) {
+    gfx_profile_ab_update();
+    gfx_profile_set_interpolated(interpolated);
 }
 
 struct ModelPhaseProfile {
@@ -488,13 +490,16 @@ static void gfx_profile_ab_clear_window(void) {
 static void gfx_profile_ab_update(void) {
 #ifndef WIIU_GEOMETRY_AUTO_AB
     static bool announced;
-    if (geometry_manual_toggle || !announced) {
+    static unsigned previous_rate;
+    const unsigned target_rate = (unsigned)(30.0f * pc_get_render_frame_multiplier());
+    if (geometry_manual_toggle || !announced || target_rate != previous_rate) {
         if (geometry_manual_toggle) geometry_manual_indexed = !geometry_manual_indexed;
         geometry_manual_toggle = false;
         gfx_profile_ab_clear_window();
-        WHBLogPrintf("MODEL_AB revision=10 experiment=indexed_geometry control=manual event=select method=%s indicator=%s packed_colors=1",
-            geometry_manual_indexed ? "indexed" : "expanded", geometry_manual_indexed ? "B" : "A");
+        WHBLogPrintf("MODEL_AB revision=10 experiment=indexed_geometry control=manual event=select method=%s indicator=%s packed_colors=1 target_fps=%u",
+            geometry_manual_indexed ? "indexed" : "expanded", geometry_manual_indexed ? "B" : "A", target_rate);
         announced = true;
+        previous_rate = target_rate;
     }
     // Apply only before the first image of a pair. Controller events merely
     // queue the change, so no pending display list sees its layout switched.
@@ -2949,7 +2954,8 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
     const uint64_t interval_us = gfx_vcutm_profile.previous_present_us != 0
         ? present_end_us - gfx_vcutm_profile.previous_present_us : 0;
     static uint64_t last_spike_log_us;
-    if (interval_us >= 33000 && present_end_us - last_spike_log_us >= 1000000) {
+    const bool target_60 = pc_get_render_frame_multiplier() > 1.0f;
+    if (interval_us >= (target_60 ? 33000 : 66000) && present_end_us - last_spike_log_us >= 1000000) {
         WHBLogPrintf("MODEL_SPIKE level=%d model=%u phase=%s interval_us=%llu total_us=%llu dl_us=%llu post_submit_us=%llu audio_us=%llu finish_us=%llu present_us=%llu draws=%u triangles=%u",
                      (int) gCurrLevelNum, model, gfx_profile_interpolated ? "interpolated" : "current", (unsigned long long) interval_us,
                      (unsigned long long) total_us, (unsigned long long) dl_us,
@@ -2963,7 +2969,7 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
     gfx_vcutm_profile.previous_present_us = present_end_us;
     struct ModelPhaseProfile *phase = &model_phase_profile[gfx_profile_interpolated ? 1 : 0];
     ++phase->frames;
-    if (interval_us >= 25000) ++phase->slow_intervals;
+    if (interval_us >= (target_60 ? 25000 : 50000)) ++phase->slow_intervals;
     phase->total_us += total_us;
     phase->pre_us += pre_submit_us;
     phase->dl_us += dl_us;

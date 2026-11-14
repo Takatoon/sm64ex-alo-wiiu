@@ -42,6 +42,7 @@
 
 #ifndef TARGET_N64
 #include "pc/configfile.h"
+#include "pc/pc_main.h"
 #endif
 
 #ifdef EXT_DEBUG_MENU
@@ -76,11 +77,7 @@ static bool draw_fps_counter(OSTime *lastTime, s16 *drawnValue) {
     OSTime currentTime = osGetTime();
 
     if (*lastTime != 0 && currentTime > *lastTime) {
-#ifdef HIGH_FPS_PC
-        const f32 frameMultiplier = 2.0f;
-#else
-        const f32 frameMultiplier = 1.0f;
-#endif
+        const f32 frameMultiplier = pc_get_render_frame_multiplier();
         const f32 fps = frameMultiplier * 1000000.0f /
                         (currentTime - *lastTime);
         const s16 fpsValue = (s16) fps;

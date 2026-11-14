@@ -117,6 +117,9 @@ static const u8 optsVideoStr[][SIZEOPTC(32)] = {
     { TEXT_OPT_ASPECT },
     { TEXT_OPT_ASPECT_169 },
     { TEXT_OPT_ASPECT_43 },
+    { TEXT_OPT_FRAMERATE },
+    { TEXT_OPT_FPS_30 },
+    { TEXT_OPT_FPS_60 },
 #ifdef WIIU_MINIMAP
     { TEXT_OPT_GAMEPAD_DISPLAY },
     { TEXT_OPT_GAMEPAD_MIRROR },
@@ -196,15 +199,18 @@ static const u8 *wiiuResolutionChoices[] = {
 };
 #ifdef WIIU_MINIMAP
 static const u8 *wiiuGamePadDisplayChoices[] = {
-    optsVideoStr[15],
-    optsVideoStr[16],
-    optsVideoStr[17],
+    optsVideoStr[18],
+    optsVideoStr[19],
+    optsVideoStr[20],
 };
 #endif
 static const u8 *wiiuAspectRatioChoices[] = {
     optsVideoStr[12],
     optsVideoStr[13],
 };
+#ifdef HIGH_FPS_PC
+static const u8 *wiiuFrameRateChoices[] = { optsVideoStr[15], optsVideoStr[16] };
+#endif
 #endif
 #endif
 
@@ -304,8 +310,11 @@ static struct Option optsVideo[] = {
 #ifdef TARGET_WII_U
     DEF_OPT_CHOICE( optsVideoStr[7], &configWiiUInternalResolution, wiiuResolutionChoices ),
     DEF_OPT_CHOICE( optsVideoStr[11], &configWiiUAspectRatio, wiiuAspectRatioChoices ),
+#ifdef HIGH_FPS_PC
+    DEF_OPT_CHOICE( optsVideoStr[14], &configWiiUFrameRate, wiiuFrameRateChoices ),
+#endif
 #ifdef WIIU_MINIMAP
-    DEF_OPT_CHOICE( optsVideoStr[14], &configWiiUGamePadDisplay, wiiuGamePadDisplayChoices ),
+    DEF_OPT_CHOICE( optsVideoStr[17], &configWiiUGamePadDisplay, wiiuGamePadDisplayChoices ),
 #endif
 #endif
     DEF_OPT_CHOICE( optsVideoStr[1], &configFiltering, filterChoices ),
