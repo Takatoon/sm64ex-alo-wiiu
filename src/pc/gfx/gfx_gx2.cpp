@@ -467,6 +467,57 @@ static void gfx_gx2_set_use_alpha(bool use_alpha)
     }
 }
 
+static VboBlock *gfx_gx2_reserve_vbo(size_t bytes)
+{
+    const size_t first_block = current_vbo_block;
+    while (current_vbo_block < vbo_blocks.size())
+    {
+        VboBlock& block = vbo_blocks[current_vbo_block];
+        size_t aligned_used = (block.used + 0x3F) & ~((size_t)0x3F);
+        if (aligned_used <= block.capacity && bytes <= block.capacity - aligned_used)
+        {
+            block.used = aligned_used;
+            return &block;
+        }
+        ++current_vbo_block;
+    }
+
+    if (bytes > SIZE_MAX - 0x3F) {
+        current_vbo_block = first_block;
+        return nullptr;
+    }
+    size_t capacity = bytes > VBO_BLOCK_SIZE
+        ? (bytes + 0x3F) & ~((size_t)0x3F) : VBO_BLOCK_SIZE;
+    uint8_t* data = static_cast<uint8_t*>(memalign(0x40, capacity));
+    if (!data) {
+        // A failed full-capacity reservation must still let the copy fallback
+        // use a smaller batch in the remaining space of an existing block.
+        current_vbo_block = first_block;
+        return nullptr;
+    }
+    vbo_blocks.push_back({data, capacity, 0});
+    current_vbo_block = vbo_blocks.size() - 1;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    ++gfx_gx2_frame_profile.allocations;
+#endif
+    return &vbo_blocks[current_vbo_block];
+}
+
+extern "C" float *gfx_gx2_reserve_vertices(size_t float_capacity)
+{
+    if (float_capacity == 0 || float_capacity > SIZE_MAX / sizeof(float)) return nullptr;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime begin = OSGetTime();
+#endif
+    VboBlock *block = gfx_gx2_reserve_vbo(float_capacity * sizeof(float));
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_STORAGE] += OSGetTime() - begin;
+#endif
+    // Reserve capacity without committing it. Small material batches consume
+    // only their actual length; the remaining space stays available.
+    return block ? reinterpret_cast<float*>(block->data + block->used) : nullptr;
+}
+
 static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris)
 {
     if (!current_shader_program)
@@ -509,46 +560,32 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
 
     size_t vbo_len = sizeof(float) * buf_vbo_len;
     VboBlock* block = nullptr;
-
-    while (current_vbo_block < vbo_blocks.size())
+    bool direct = false;
+    if (current_vbo_block < vbo_blocks.size())
     {
         VboBlock& candidate = vbo_blocks[current_vbo_block];
-        size_t aligned_used = (candidate.used + 0x3F) & ~((size_t)0x3F);
-        if (aligned_used + vbo_len <= candidate.capacity)
+        if (buf_vbo == reinterpret_cast<float*>(candidate.data + candidate.used) &&
+            vbo_len <= candidate.capacity - candidate.used)
         {
-            candidate.used = aligned_used;
             block = &candidate;
-            break;
+            direct = true;
         }
-        current_vbo_block++;
     }
-
-    if (!block)
-    {
-        size_t capacity = vbo_len > VBO_BLOCK_SIZE
-            ? (vbo_len + 0x3F) & ~((size_t)0x3F)
-            : VBO_BLOCK_SIZE;
-        uint8_t* data = static_cast<uint8_t*>(memalign(0x40, capacity));
-        if (!data)
-            return;
-        vbo_blocks.push_back({data, capacity, 0});
-#ifdef WIIU_LOAD_TIMING_PROFILE
-        ++gfx_gx2_frame_profile.allocations;
-#endif
-        current_vbo_block = vbo_blocks.size() - 1;
-        block = &vbo_blocks[current_vbo_block];
-    }
+    if (!block) block = gfx_gx2_reserve_vbo(vbo_len);
+    if (!block) return;
 
     float* new_vbo = reinterpret_cast<float*>(block->data + block->used);
 #ifdef WIIU_LOAD_TIMING_PROFILE
     const OSTime copy_begin = OSGetTime();
     gfx_gx2_frame_profile.ticks[WIIU_GX2_STORAGE] += copy_begin - storage_begin;
 #endif
-    memcpy(new_vbo, buf_vbo, vbo_len);
+    if (!direct) memcpy(new_vbo, buf_vbo, vbo_len);
     block->used += vbo_len;
 #ifdef WIIU_LOAD_TIMING_PROFILE
     const OSTime publish_begin = OSGetTime();
-    gfx_gx2_frame_profile.ticks[WIIU_GX2_COPY] += publish_begin - copy_begin;
+    if (!direct) gfx_gx2_frame_profile.ticks[WIIU_GX2_COPY] += publish_begin - copy_begin;
+    if (direct) ++gfx_gx2_frame_profile.direct_draws;
+    else ++gfx_gx2_frame_profile.copied_draws;
     gfx_gx2_frame_profile.vbo_bytes += vbo_len;
     ++gfx_gx2_frame_profile.draw_calls;
 #endif
@@ -573,7 +610,7 @@ static void gfx_gx2_get_framebuffer(uint16_t *buffer) {
 
 static void gfx_gx2_init(void) 
 {
-    WHBLogPrint("GX2_VBO_COHERENCY mode=before_draw");
+    WHBLogPrint("GX2_VBO_COHERENCY mode=before_draw vertices=direct");
 }
 
 static void gfx_gx2_on_resize(void) 

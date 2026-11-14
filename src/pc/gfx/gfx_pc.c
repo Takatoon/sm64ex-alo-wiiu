@@ -1683,6 +1683,15 @@ retry_texture_bindings:;
     }
 #endif
 
+#ifdef TARGET_WII_U
+    if (buf_vbo_len == 0) {
+        // Acquire only after all material/texture changes have flushed. No
+        // backend work can move this reservation while the batch is filled.
+        float *direct = gfx_rapi == &gfx_gx2_api
+            ? gfx_gx2_reserve_vertices(VERTEX_BUFFER_SIZE) : NULL;
+        buf_vbo = direct != NULL ? direct : buf_vbo_fallback;
+    }
+#endif
     for (int i = 0; i < 3; i++) {
         float z = v_arr[i]->z, w = v_arr[i]->w;
         if (z_is_from_0_to_1) {

@@ -17,6 +17,9 @@ extern uint32_t g_render_offset_x;
 extern uint32_t g_render_offset_y;
 
 void gfx_gx2_free_vbo(void);
+/* Render thread only. Uncommitted space for one frontend batch; submit through
+ * draw_triangles before reserving again. Never retained across finish_render. */
+float *gfx_gx2_reserve_vertices(size_t float_capacity);
 void gfx_gx2_flush_vbo_cache(void);
 void gfx_gx2_free(void);
 struct WiiUTextureImage;
