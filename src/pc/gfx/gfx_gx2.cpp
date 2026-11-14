@@ -61,7 +61,7 @@ static struct ShaderProgram shader_program_pool[64];
 static uint8_t shader_program_pool_size = 0;
 
 static struct ShaderProgram* current_shader_program = nullptr;
-static bool packed_colors;
+static bool packed_colors = true;
 
 extern "C" bool gfx_gx2_packed_colors(void) { return packed_colors; }
 
