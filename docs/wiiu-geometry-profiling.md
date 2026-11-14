@@ -26,6 +26,17 @@ The floor-selection test exercises jumps across all three HMC boundaries,
 landing on another floor, lifts, unsupported/suspended movement and BBH rooms.
 Hardware confirmation of the corrected build is still pending.
 
+Panel rebuilds also reuse horizontal texture samples across rows instead
+of dividing once per pixel; fully transparent/opaque blits bypass blending.
+`tools/tests/check_wiiu_drc_blit.py` compares the real blitter to the preceding
+arithmetic in 256 native/HD, clipping, opacity and red-coin cases, including
+unchanged surface padding, under address/undefined-behavior sanitizers.
+Output is byte-identical. This is reduced CPU work, not an isolated measured
+Wii U speedup. The first visit to a genuinely different floor still composes
+its panel. The profiling build now logs `MINIMAP_SELECT` with Mario/floor Y,
+action and selected image, plus `MINIMAP_REBUILD` with composition duration,
+to verify real floor changes and distinguish them from short jumps.
+
 ## Baseline
 
 The preceding `SM64 Geometry Profile` capture is saved locally in

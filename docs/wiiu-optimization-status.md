@@ -23,6 +23,26 @@ de los registros incluso al estar cerca del límite de pantalla.
 La corrección de `kill_enable` ya está en la base publicada; se conserva y no
 se presenta como una optimización nueva de esta rama.
 
+## Tirones del minimapa en HMC
+
+Confirmados en el log: pausas de ~105 ms, con ~98 ms preparando el GamePad.
+El usuario confirma que desaparecen con Mirror TV. Se reproducen tanto con
+F como con R y también con Mario original. Las muestras de altura coinciden
+con los límites entre plantas del minimapa.
+
+- `f89e8f65`: HMC y BBH eligen la planta por la altura del suelo de colisión,
+  evitando cambiarla solo por la altura de un salto. Nadando, volando,
+  colgado, en una barra o sin suelo válido se conserva la altura de Mario.
+- La reconstrucción reutiliza las coordenadas de muestreo horizontal y
+  evita mezclar píxeles totalmente opacos o transparentes. Las pruebas
+  conservan exactamente los mismos píxeles, también con texturas HD.
+- Los registros `MINIMAP_SELECT` y `MINIMAP_REBUILD` permiten comprobar
+  cada cambio de imagen y su coste. Falta verificar la corrección en consola;
+  no se promete eliminar el coste de la primera composición de otra planta.
+
+En las pruebas visuales de color el usuario tampoco aprecia diferencias con
+agua y fuego. Sigue siendo una comprobación parcial de RGBA8.
+
 ## Prueba actual: selector manual de color
 
 - Registros: `revision=9`, `control=manual`.

@@ -679,14 +679,16 @@ static void gfx_gx2_compose_drc_panel(const struct WiiUMinimapFrame* frame)
             gfx_gx2_load_minimap_texture(frame->texture_path);
         if (texture)
         {
+            int source_x[DRC_MAP_SIZE];
+            for (uint32_t x = 0; x < DRC_MAP_SIZE; ++x)
+                source_x[x] = x * texture->width / DRC_MAP_SIZE;
             for (uint32_t y = 0; y < DRC_MAP_SIZE; ++y)
             {
                 int source_y = y * texture->height / DRC_MAP_SIZE;
                 for (uint32_t x = 0; x < DRC_MAP_SIZE; ++x)
                 {
-                    int source_x = x * texture->width / DRC_MAP_SIZE;
                     const uint8_t* source = texture->pixels +
-                        ((size_t)source_y * texture->width + source_x) * 4;
+                        ((size_t)source_y * texture->width + source_x[x]) * 4;
                     uint8_t* dest = gfx_gx2_drc_pixel(g_drc_panel_base, x, y);
                     uint32_t alpha = source[3];
                     dest[0] = (source[0] * alpha + dest[0] * (255 - alpha)) / 255;
@@ -1015,6 +1017,15 @@ static void gfx_gx2_cache_music_title(int sequence)
 
 static void gfx_gx2_drc_blend(uint8_t* dest, uint8_t red, uint8_t green, uint8_t blue, unsigned alpha)
 {
+    if (alpha == 0)
+        return;
+    if (alpha == 255) {
+        dest[0] = red;
+        dest[1] = green;
+        dest[2] = blue;
+        dest[3] = 255;
+        return;
+    }
     dest[0] = (red * alpha + dest[0] * (255 - alpha)) / 255;
     dest[1] = (green * alpha + dest[1] * (255 - alpha)) / 255;
     dest[2] = (blue * alpha + dest[2] * (255 - alpha)) / 255;
@@ -1028,20 +1039,27 @@ static void gfx_gx2_blit_drc_image(uint8_t* target, const WiiUMinimapTextureCach
     if (!texture || width <= 0 || height <= 0)
         return;
 
-    for (int dest_y = 0; dest_y < height; ++dest_y)
-    {
-        int panel_y = y + dest_y;
-        if (panel_y < clip.y || panel_y >= clip.y + clip.height)
-            continue;
-        int source_y = dest_y * texture->height / height;
-        for (int dest_x = 0; dest_x < width; ++dest_x)
-        {
-            int panel_x = x + dest_x;
-            if (panel_x < clip.x || panel_x >= clip.x + clip.width)
-                continue;
-            int source_x = dest_x * texture->width / width;
+    int left = x > clip.x ? x : clip.x;
+    int top = y > clip.y ? y : clip.y;
+    int right = x + width < clip.x + clip.width ? x + width : clip.x + clip.width;
+    int bottom = y + height < clip.y + clip.height ? y + height : clip.y + clip.height;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > (int)DRC_WIDTH) right = DRC_WIDTH;
+    if (bottom > (int)DRC_HEIGHT) bottom = DRC_HEIGHT;
+    if (left >= right || top >= bottom)
+        return;
+
+    // The same horizontal samples serve every row, including HD textures.
+    // Restrict work to the visible portion of the image before scaling.
+    int source_x[DRC_WIDTH];
+    for (int panel_x = left; panel_x < right; ++panel_x)
+        source_x[panel_x - left] = (panel_x - x) * texture->width / width;
+    for (int panel_y = top; panel_y < bottom; ++panel_y) {
+        int source_y = (panel_y - y) * texture->height / height;
+        for (int panel_x = left; panel_x < right; ++panel_x) {
             const uint8_t* source = texture->pixels +
-                ((size_t)source_y * texture->width + source_x) * 4;
+                ((size_t)source_y * texture->width + source_x[panel_x - left]) * 4;
             if (source[3] == 0)
                 continue;
             gfx_gx2_drc_blend(gfx_gx2_drc_pixel(target, panel_x, panel_y),
@@ -1582,8 +1600,18 @@ static bool gfx_gx2_prepare_drc_panel(bool touch_pressed)
 
     bool texture_changed = !g_drc_panel_texture_path ||
                            strcmp(g_drc_panel_texture_path, frame.texture_path);
-    if (!g_drc_panel_base_valid || texture_changed)
+    if (!g_drc_panel_base_valid || texture_changed) {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+        const OSTime rebuild_begin = OSGetTime();
+#endif
         gfx_gx2_compose_drc_panel(&frame);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+        WHBLogPrintf("MINIMAP_REBUILD texture=%s changed=%u zoom=%u gpu=%u total_us=%llu",
+                     frame.texture_path, (unsigned)texture_changed,
+                     (unsigned)g_drc_map_zoomed, (unsigned)g_drc_gpu_zoom,
+                     (unsigned long long)OSTicksToMicroseconds(OSGetTime() - rebuild_begin));
+#endif
+    }
 
     WiiUMapView view = gfx_gx2_update_drc_map_view(frame);
     gfx_gx2_restore_drc_marker();
