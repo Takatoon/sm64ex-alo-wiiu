@@ -1,6 +1,7 @@
 """Run on the Wii U development image; checks sources without building a WUHB."""
 from pathlib import Path
 import shlex
+import re
 import subprocess
 import tempfile
 
@@ -81,6 +82,81 @@ def check_map_visibility(directory):
     print("PASS: map retained during dialogue, scripted intro text, stale Mario/menu state", flush=True)
 
 
+def check_floor_selection(directory):
+    source = (ROOT / "src/pc/wiiu_minimap.c").read_text()
+    actions = (ROOT / "include/sm64.h").read_text()
+    flags = "\n".join(re.search(r"^#define " + name + r"\s+.*$", actions, re.M).group()
+                      for name in ("ACT_FLAG_AIR", "ACT_FLAG_SWIMMING_OR_FLYING",
+                                   "ACT_FLAG_ON_POLE", "ACT_FLAG_HANGING"))
+    layers = source[source.index("enum WiiUMinimapLayer {"):]
+    layers = layers[:layers.index("};") + 2]
+    helpers = source[source.index("static float minimap_floor_height(void)"):
+                     source.index("static bool bowser_3_full_arena_active(void)")]
+    fixture = r'''
+    #include <cassert>
+    #include <cstdint>
+    #include <cstddef>
+    #include <initializer_list>
+    typedef uint32_t u32;
+    struct WiiUMinimapInfo { int id; };
+    static WiiUMinimapInfo sHmcMaps[] = {{0}, {1}, {2}, {3}};
+    struct MarioState { float pos[3], floorHeight; void* floor; u32 action; } mario;
+    static MarioState* gMarioState = &mario;
+    static int gMarioCurrentRoom;
+    enum { BBH_OUTSIDE_ROOM = 99 };
+    '''
+    tests = r'''
+    int main() {
+        int collision;
+        mario.floor = &collision;
+        // Same supporting floor, despite crossing a boundary twice per jump.
+        for (int boundary : {-2000, 750, 2250}) {
+            mario.floorHeight = boundary - 80;
+            mario.action = 0;
+            mario.pos[1] = mario.floorHeight;
+            auto* lower = hmc_map_for_mario();
+            for (int rise : {0, 40, 80, 160, 300, 160, 80, 40, 0}) {
+                mario.action = rise ? ACT_FLAG_AIR : 0;
+                mario.pos[1] = mario.floorHeight + rise;
+                assert(hmc_map_for_mario() == lower);
+            }
+            // Landing upstairs or riding a lift must change the map.
+            mario.floorHeight = boundary + 80;
+            mario.pos[1] = mario.floorHeight;
+            assert(hmc_map_for_mario()->id == lower->id + 1);
+        }
+        // Water, flight, poles, hanging and absent collision use actual height.
+        mario.floorHeight = 0;
+        mario.pos[1] = 2500;
+        for (u32 action : {u32(ACT_FLAG_SWIMMING_OR_FLYING), u32(ACT_FLAG_ON_POLE),
+                           u32(ACT_FLAG_HANGING)}) {
+            mario.action = action;
+            assert(hmc_map_for_mario()->id == 3);
+        }
+        mario.action = ACT_FLAG_AIR; mario.floor = nullptr;
+        assert(hmc_map_for_mario()->id == 3);
+        mario.floor = &collision; mario.floorHeight = -2100;
+        assert(hmc_map_for_mario()->id == 0); // No stale floor from another level.
+
+        // BBH shares the fix but retains its room-based exterior selection.
+        gMarioCurrentRoom = 1;
+        mario.floorHeight = 700; mario.pos[1] = 1000;
+        assert(bbh_layer_for_mario() == WIIU_MINIMAP_LAYER_GROUND);
+        mario.floorHeight = 900;
+        assert(bbh_layer_for_mario() == WIIU_MINIMAP_LAYER_UPPER);
+        gMarioCurrentRoom = BBH_OUTSIDE_ROOM;
+        assert(bbh_layer_for_mario() == WIIU_MINIMAP_LAYER_OUTSIDE);
+    }
+    '''
+    cpp = Path(directory) / "floor-selection.cpp"
+    cpp.write_text(fixture + flags + "\n" + layers + helpers + tests)
+    binary = str(Path(directory) / "floor-selection-test")
+    subprocess.run(["g++", "-std=c++17", "-fsanitize=undefined", str(cpp), "-o", binary],
+                   cwd=ROOT, check=True)
+    subprocess.run([binary], cwd=ROOT, check=True, timeout=20)
+    print("PASS: HMC/BBH jumps retain supporting floor; landings, lifts and suspended movement", flush=True)
+
+
 def check_wdw_water_levels(directory):
     source = (ROOT / "src/pc/wiiu_minimap.c").read_text()
     selector = source[source.index("static const struct WiiUMinimapInfo *wdw_map_for_water_level(void)"):
@@ -145,6 +221,7 @@ def main():
         subprocess.run([binary], cwd=ROOT, check=True, timeout=20,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         check_map_visibility(directory)
+        check_floor_selection(directory)
         check_wdw_water_levels(directory)
     print("PASS: touch edges, zoom bounds, native/HD font metrics, DDS decoding", flush=True)
 

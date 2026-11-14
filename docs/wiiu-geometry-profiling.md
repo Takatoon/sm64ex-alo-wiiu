@@ -5,6 +5,27 @@ model. Exclude model changes, level loading and the first frames after either
 from performance comparisons. Keep the level, player position, camera,
 resolution, texture packs and other models unchanged.
 
+## HMC jump stutters: minimap floor selection
+
+The manual-color capture is saved locally as
+`../sm64ex-alo/logs/wiiu/galaxy-manual-color-hmc-stutters-20261114.log`,
+with parsed records in the matching `.json` file. Excluding level entry,
+the latest Galaxy stalls last 105–107 ms, including 97.8–98.3 ms after
+scene submission; display-list processing remains 5.0–6.0 ms. The DRC
+preparation counters account for the extra work. Similar HMC stalls occur
+with float/RGBA8 and with original Mario. The user confirmed they disappear
+when switching the GamePad to Mirror TV in the same area.
+
+Worst-image position samples straddle the HMC map thresholds (2246/2258
+around 2250, and 741 around 750). The selector previously used Mario's own
+Y, causing a jump to select another floor and rebuild the whole panel.
+HMC and BBH now use the supporting collision floor's height, including
+moving platforms. Swimming/flying, poles, hanging and missing collision
+retain position-based selection. Marker projection and gameplay are unchanged.
+The floor-selection test exercises jumps across all three HMC boundaries,
+landing on another floor, lifts, unsupported/suspended movement and BBH rooms.
+Hardware confirmation of the corrected build is still pending.
+
 ## Baseline
 
 The preceding `SM64 Geometry Profile` capture is saved locally in

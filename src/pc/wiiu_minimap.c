@@ -18,6 +18,9 @@
 #include "object_fields.h"
 
 #include "wiiu_minimap.h"
+#ifdef WIIU_LOAD_TIMING_PROFILE
+#include <whb/log.h>
+#endif
 
 /*
  * State selection and marker projection are adapted from Mark Street's
@@ -134,8 +137,26 @@ static float clampf(float value, float low, float high) {
     return value;
 }
 
+static float minimap_floor_height(void) {
+    /* A jump does not move Mario to the floor above him. Use the collision
+       floor (including lifts/platforms), while unsupported and genuinely
+       suspended movement still follows Mario's own elevation. */
+    const u32 suspended = ACT_FLAG_SWIMMING_OR_FLYING | ACT_FLAG_ON_POLE |
+                          ACT_FLAG_HANGING;
+    if (gMarioState->floor != NULL && !(gMarioState->action & suspended))
+        return gMarioState->floorHeight;
+    return gMarioState->pos[1];
+}
+
+static const struct WiiUMinimapInfo *hmc_map_for_mario(void) {
+    const float height = minimap_floor_height();
+    return &sHmcMaps[height < -2000.0f ? 0 :
+                     height < 750.0f ? 1 :
+                     height < 2250.0f ? 2 : 3];
+}
+
 static enum WiiUMinimapLayer bbh_layer_for_mario(void) {
-    const float height = gMarioState->pos[1];
+    const float height = minimap_floor_height();
 
     if (gMarioCurrentRoom == BBH_OUTSIDE_ROOM)
         return WIIU_MINIMAP_LAYER_OUTSIDE;
@@ -251,10 +272,7 @@ bool wiiu_minimap_get_frame(struct WiiUMinimapFrame *frame) {
         layer = bbh_layer_for_mario();
         map = &sBbhMaps[layer];
     } else if (gCurrLevelNum == LEVEL_HMC && gCurrAreaIndex == 1) {
-        const float height = gMarioState->pos[1];
-        map = &sHmcMaps[height < -2000.0f ? 0 :
-                        height < 750.0f ? 1 :
-                        height < 2250.0f ? 2 : 3];
+        map = hmc_map_for_mario();
     } else if (gCurrLevelNum == LEVEL_WDW &&
                (gCurrAreaIndex == 1 || gCurrAreaIndex == 2)) {
         map = wdw_map_for_water_level();
@@ -286,6 +304,17 @@ bool wiiu_minimap_get_frame(struct WiiUMinimapFrame *frame) {
               sCurrentMoatDrained != moat_drained ||
               (gCurrLevelNum == LEVEL_BBH &&
                (sCurrentRoom != gMarioCurrentRoom || sCurrentLayer != layer));
+
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    if (sCurrentMap != map || sCurrentLevel != gCurrLevelNum ||
+        sCurrentArea != gCurrAreaIndex) {
+        WHBLogPrintf("MINIMAP_SELECT level=%d area=%d room=%d mario_y=%d floor_y=%d action=0x%08X texture=%s",
+                     (int) gCurrLevelNum, (int) gCurrAreaIndex,
+                     (int) gMarioCurrentRoom, (int) gMarioState->pos[1],
+                     (int) minimap_floor_height(), (unsigned) gMarioState->action,
+                     map->texture_path);
+    }
+#endif
 
     sCurrentLevel = gCurrLevelNum;
     sCurrentArea = gCurrAreaIndex;
