@@ -22,6 +22,9 @@
 #endif
 #include "star_select.h"
 #include "text_strings.h"
+#ifdef CHEATS_ACTIONS
+#include "extras/cheats.h"
+#endif
 
 /**
  * @file star_select.c
@@ -41,6 +44,9 @@ static u8 sObtainedStars;
 
 // Total number of stars that appear in the act selector menu.
 static s8 sVisibleStars;
+
+// Snapshot the cheat for this visit so rendering, scrolling and loading agree.
+static u8 sSelectAnyStar;
 
 // Act selected when the act menu is first opened.
 static u8 sInitSelectedActNum;
@@ -113,7 +119,7 @@ void bhv_act_selector_init(void) {
     u8 stars = save_file_get_star_flags(gCurrSaveFileNum - 1, COURSE_NUM_TO_INDEX(gCurrCourseNum));
 
     sVisibleStars = 0;
-    while (i != sObtainedStars) {
+    while (i != sObtainedStars || (sSelectAnyStar && sVisibleStars < 6)) {
         if (stars & (1 << sVisibleStars)) { // Star has been collected
             selectorModelIDs[sVisibleStars] = MODEL_STAR;
             i++;
@@ -148,6 +154,10 @@ void bhv_act_selector_init(void) {
         sInitSelectedActNum = 1;
     }
 
+    if (sSelectAnyStar) {
+        sSelectableStarIndex = sInitSelectedActNum - 1;
+    }
+
     // Render star selector objects
     for (i = 0; i < sVisibleStars; i++) {
         sStarSelectorModels[i] =
@@ -171,7 +181,7 @@ void bhv_act_selector_loop(void) {
     u8 starIndexCounter;
     u8 stars = save_file_get_star_flags(gCurrSaveFileNum - 1, COURSE_NUM_TO_INDEX(gCurrCourseNum));
 
-    if (sObtainedStars != 6) {
+    if (!sSelectAnyStar && sObtainedStars != 6) {
         // Sometimes, stars are not selectable even if they appear on the screen.
         // This code filters selectable and non-selectable stars.
         sSelectedActIndex = 0;
@@ -188,7 +198,7 @@ void bhv_act_selector_loop(void) {
             }
         }
     } else {
-        // If all stars are collected then they are all selectable.
+        // All stars are selectable when collected or when the cheat is active.
         handle_menu_scrolling(MENU_SCROLL_HORIZONTAL, &sSelectableStarIndex, 0, sVisibleStars - 1);
         sSelectedActIndex = sSelectableStarIndex;
     }
@@ -418,6 +428,11 @@ s32 lvl_init_act_selector_values_and_stars(UNUSED s32 arg, UNUSED s32 unused) {
     sInitSelectedActNum = 0;
     sVisibleStars = 0;
     sActSelectorMenuTimer = 0;
+#ifdef CHEATS_ACTIONS
+    sSelectAnyStar = Cheats.EnableCheats && Cheats.SelectAnyStar;
+#else
+    sSelectAnyStar = FALSE;
+#endif
 #ifdef NO_SEGMENTED_MEMORY
     sSelectedActIndex = 0;
     sSelectableStarIndex = 0;
@@ -453,7 +468,7 @@ s32 lvl_update_obj_and_load_act_button_actions(UNUSED s32 arg, UNUSED s32 unused
             queue_rumble_data(60, 70);
             queue_rumble_decay(1);
 #endif
-            if (sInitSelectedActNum >= sSelectedActIndex + 1) {
+            if (sSelectAnyStar || sInitSelectedActNum >= sSelectedActIndex + 1) {
                 sLoadedActNum = sSelectedActIndex + 1;
             } else {
                 sLoadedActNum = sInitSelectedActNum;

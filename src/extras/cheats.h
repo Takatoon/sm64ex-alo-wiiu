@@ -48,6 +48,7 @@ struct CheatList {
     bool    Responsive;
     bool    ExitAnywhere;
     bool    NonstopStars;
+    bool    SelectAnyStar;
     bool    NoFallDamage;
     u32     MarioSize;
     struct CheatListWalkOn WalkOn;

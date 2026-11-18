@@ -49,6 +49,7 @@ static const u8 optsCheatsStr[][SIZEOPTC(64)] = {
     { TEXT_OPT_CHEAT10 },
     { TEXT_OPT_CHEAT11 },
     { TEXT_OPT_CHEAT12 },
+    { TEXT_OPT_CHEAT13 },
 };
 
 static const u8 optsMarioSizeCheatStr[][SIZEOPTC(64)] = {
@@ -117,6 +118,7 @@ struct Option optsCheats[] = {
     DEF_OPT_TOGGLE( optsCheatsStr[6], &Cheats.Responsive ),
     DEF_OPT_TOGGLE( optsCheatsStr[7], &Cheats.ExitAnywhere ),
     DEF_OPT_TOGGLE( optsCheatsStr[12], &Cheats.NonstopStars ),
+    DEF_OPT_TOGGLE( optsCheatsStr[13], &Cheats.SelectAnyStar ),
     DEF_OPT_TOGGLE( optsCheatsStr[8], &Cheats.NoFallDamage ),
     DEF_OPT_CHOICE( optsCheatsStr[9], &Cheats.MarioSize, cheatChoicesMarioSize ),
     DEF_OPT_SUBMENU(optsCheatsStr[10], &menuCheatBljAny ),
