@@ -1,47 +1,28 @@
 # Super Mario 64 Wii U (sm64ex-alo)
 
-This is a Wii U-focused fork of
-[AloUltraExt's sm64ex-alo](https://github.com/AloUltraExt/sm64ex-alo).
-It adds a Docker-based build workflow, improves external texture-pack loading, and includes various Wii U-specific enhancements and fixes. The original project's documentation is preserved below.
+This is a Wii U-focused fork of [AloUltraExt's sm64ex-alo](https://github.com/AloUltraExt/sm64ex-alo), expanding the experience with a dedicated GamePad interface, interactive minimaps, partial DynOS support, improved texture loading and rendering, configurable display options, and a guided build workflow. **All original code additions and modifications developed for this fork are AI-assisted using OpenAI Codex.** Inherited code and adaptations from other projects retain their respective authorship.
 
-### Wii U changes
+### Main improvements
 
-* Fixed external texture cache lookups so replacement textures resolve correctly when the entire pack is loaded at startup (`precache true` in `sm64config.txt`).
+* **Dedicated GamePad interface:** a status panel with an interactive minimap, touch zoom, and contextual game information. The minimap adapts [Mark Street's (`mkst`) 3DS prototype](https://github.com/mkst/sm64-port/tree/3ds-minimap), adding Wii U rendering, floor selection, and map variants.
 
-* Improved texture loading with `precache false` by adding selective preloading based on texture lists. Startup textures are preloaded before the first screen, and course-specific textures are preloaded during level transitions. Textures not included in the preload lists still fall back to on-demand loading during gameplay, preserving the previous behavior.
+* **Partial DynOS support:** load compatible user-provided player models and NPC packs, with external voices for supported characters. No model or voice packs are included. Format references include [Render96/Render96ex](https://github.com/Render96/Render96ex) and [Coop Deluxe/sm64coopdx](https://github.com/coop-deluxe/sm64coopdx). Compatibility is limited; arbitrary Lua execution and Character Select gameplay features are not supported.
 
-* Reduced ZIP texture-loading overhead by keeping the archive open while preserving the priority of loose files and other texture packs.
+* **In-game mod management:** select texture packs, player models, and NPC packs, then apply changes during gameplay. Controller shortcuts allow quick player-model switching.
 
-* Added support for building the game as a WUHB package.
+* **Improved texture loading and rendering:** full or selective texture preloading, reduced ZIP-loading overhead, and Wii U graphics optimizations and fixes.
 
-* Added an application-local layout for `sm64config.txt`, `saves/`, `mods/`, and other external game files, keeping them inside the application's folder under `wiiu/apps/`. A build option is available to retain the previous SD layout.
+* **Configurable display options:** adjust resolution, aspect ratio, and the 30/60 FPS target without restarting the game, with an optional FPS counter. Performance depends on the scene and installed mods.
 
-* Added support for arbitrary application folder names under `wiiu/apps/`, instead of requiring a fixed folder name. This requires Aroma Beta 11 or newer.
+* **Additional cheats:** **Nonstop Stars** lets Mario remain in a level after collecting a regular star. **Select any star** allows choosing any of a course's six mission stars regardless of progression, without changing collected-star records.
 
-* Added a guided Docker-based build script for compiling the Wii U version of the game and preparing texture packs.
+* **Gameplay and controller fixes:** improved controller mappings, a fix for the Tall, Tall Mountain camera lock, and returning directly to the Wii U Menu after Save and Exit.
 
-* Fixed **Save and Exit** after collecting a star to return directly to the Wii U Menu.
+* **Guided build and installation:** a Docker-based wizard for compiling the game, preparing texture packs, and creating WUHB packages with configurable titles and artwork. Configuration, saves, and mods can remain together in the application folder.
 
-* Added **Settings > Video** options for automatic, forced 720p, or forced 480p internal rendering, plus 16:9 or 4:3 aspect ratio. Changes can be applied without restarting the game.
+* **Optional minimap generation:** [SM64 Map Extractor](https://github.com/Takatoon/SM64-map-extractor) generates minimaps from user-extracted game resources. Its geometry filtering rules include adaptations from [Epic0522's Super Mario 64 3DS Port Ultimate](https://github.com/Epic0522/Super-Mario-64-3ds-port---Ultimate).
 
-* Added **Settings > Video > Frame Rate** option to switch between 30 FPS and 60 FPS without restarting the game. Limiting the game to 30 FPS can leave more rendering headroom for high-resolution texture packs, but it does not provide the same performance savings as a native 30 FPS build, since the game logic still runs at the 60 FPS rate.
-
-* Reduced unnecessary rendering in the **pause > Settings** menu.
-
-* Added an optional **Settings > HUD > Show FPS** counter, disabled by default and available in non-debug builds.
-
-* Adjusted face-button mappings for the Wii U GamePad and Wii U Pro Controller. The Pro Controller and Wii Classic Controller D-pads now also work as the N64 D-pad, including in the debug level selector.
-
-* Added a **Nonstop Stars** cheat that lets Mario remain in a level after collecting a regular star; grand stars and Bowser keys retain their normal behavior. The cheats menu can be opened by pressing L three times from the pause menu.
-
-* Added optional Wii U load-time profiling and a log analyzer for diagnosing texture loads, level transitions, and frame-time stalls. Profiling is disabled in normal builds.
-
-* Added optional, partial DynOS support for player models and NPC/actor packs, including selected NPCs with custom skeletons and embedded animations.
-
-* Added optional external player voices from Ogg Vorbis files and static Character Select-style `CHAR_SOUND_*` tables, following the selected DynOS model without recompiling voice banks.
-
-* Added an **Options > MODS** menu to enable/disable mods, select textures, a player model and one NPC pack, and apply changes without restarting the level. Hold **Minus (-) + D-pad Left/Right** to cycle player models.
-
+See [Wii U changes and implementation details](docs/wiiu-changes.md) for more information.
 
 ### Requirements
 
@@ -216,12 +197,15 @@ not included in this repository.
 
 ### Credits
 
-This fork builds on [sm64ex-alo](https://github.com/AloUltraExt/sm64ex-alo),
-the [SM64 decompilation project](https://github.com/n64decomp/sm64),
-[sm64ex](https://github.com/sm64pc/sm64ex), and the Wii U work by
-[AboodXD](https://github.com/aboood40091). Please refer to the original
-projects and this repository's commit history for their respective authors and
-contributions.
+This fork builds on [sm64ex-alo](https://github.com/AloUltraExt/sm64ex-alo), the [Super Mario 64 decompilation project](https://github.com/n64decomp/sm64), [sm64ex](https://github.com/sm64pc/sm64ex), and the Wii U port by [AboodXD](https://github.com/aboood40091).
+
+Additional acknowledgements:
+
+* **[Mark Street (`mkst`)](https://github.com/mkst/sm64-port/tree/3ds-minimap):** the original 3DS minimap prototype adapted for the GamePad minimap.
+* **[Epic0522 and the 3DS Port Ultimate contributors](https://github.com/Epic0522/Super-Mario-64-3ds-port---Ultimate):** minimap generator filtering rules adapted in SM64 Map Extractor, alongside technical and visual references.
+* **[Render96/Render96ex](https://github.com/Render96/Render96ex) and [Coop Deluxe/sm64coopdx](https://github.com/coop-deluxe/sm64coopdx) contributors:** DynOS binary-format references used to develop compatible loading support.
+
+Please refer to the original projects and this repository's commit history for their respective authors and contributions.
 
 ## Original sm64ex-alo documentation
 
