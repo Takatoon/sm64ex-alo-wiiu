@@ -2211,6 +2211,23 @@ void sound_init(void) {
     sSoundRequestCount = 0;
 }
 
+#ifdef WIIU_MINIMAP
+s32 audio_channel_is_drowning_alert(struct SequenceChannel *channel) {
+    u8 channelIndex = 0;
+    for (u8 bank = 0; bank < SOUND_BANK_MOVING; ++bank)
+        channelIndex += sMaxChannelsForSoundBank[bank];
+    for (u8 slot = 0; slot < sUsedChannelsForSoundBank[SOUND_BANK_MOVING]; ++slot) {
+        u8 sound = sCurrentSound[SOUND_BANK_MOVING][slot];
+        if (sound != 0xff && channel == gSequencePlayers[SEQ_PLAYER_SFX].channels[channelIndex + slot]) {
+            u32 mask = SOUNDARGS_MASK_BANK | SOUNDARGS_MASK_SOUNDID;
+            return (sSoundBanks[SOUND_BANK_MOVING][sound].soundBits & mask) ==
+                   (SOUND_MOVING_ALMOST_DROWNING & mask);
+        }
+    }
+    return FALSE;
+}
+#endif
+
 // (unused)
 void get_currently_playing_sound(u8 bank, u8 *numPlayingSounds, u8 *numSoundsInBank, u8 *soundId) {
     u8 i;

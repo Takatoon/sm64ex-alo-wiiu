@@ -7,6 +7,9 @@
 #include "engine/behavior_script.h"
 #include "engine/graph_node.h"
 #include "engine/math_util.h"
+#ifdef WIIU_MINIMAP
+#include "pc/wiiu_minimap.h"
+#endif
 #include "file_select.h"
 #include "gfx_dimensions.h"
 #include "game/area.h"
@@ -3308,6 +3311,9 @@ Gfx *geo_file_select_strings_and_menu_cursor(s32 callContext, UNUSED struct Grap
  * either completing a course choosing "SAVE & QUIT" or having a game over.
  */
 s32 lvl_init_menu_values_and_cursor_pos(UNUSED s32 arg, UNUSED s32 unused) {
+#ifdef WIIU_MINIMAP
+    wiiu_minimap_set_menu_screen(WIIU_MINIMAP_MENU_MIRROR_TV);
+#endif
 #ifdef VERSION_EU
     s8 fileIndex;
 #endif

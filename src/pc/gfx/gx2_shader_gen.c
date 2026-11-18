@@ -504,10 +504,36 @@ int gx2GenerateShaderGroup(struct ShaderGroup *group, struct CCFeatures *cc_feat
 
     GX2InitFetchShaderEx(&group->fetchShader, group->fetchShader.program, group->numAttributes, group->attributes, GX2_FETCH_SHADER_TESSELLATION_NONE, GX2_TESSELLATION_MODE_DISCRETE);
 
+    // Canonical RGBA bytes: the GPU normalizes them when fetching the vertex.
+    // Keep the existing 16-byte position and padded UV fields.
+    GX2AttribStream packedAttributes[7];
+    uint32_t packedOffset = 0;
+    for (uint32_t i = 0; i < group->numAttributes; ++i) {
+        packedAttributes[i] = group->attributes[i];
+        packedAttributes[i].offset = packedOffset;
+        if (packedAttributes[i].location >= 2) {
+            packedAttributes[i].format = GX2_ATTRIB_FORMAT_UNORM_8_8_8_8;
+            packedAttributes[i].endianSwap = GX2_ENDIAN_SWAP_NONE;
+            packedOffset += 4;
+        } else {
+            packedOffset += 4 * sizeof(float);
+        }
+    }
+    group->packedVertexStride = packedOffset;
+    group->packedFetchShader.size = group->fetchShader.size;
+    group->packedFetchShader.program = memalign(GX2_SHADER_PROGRAM_ALIGNMENT, group->packedFetchShader.size);
+    if (!group->packedFetchShader.program) {
+        gx2FreeShaderGroup(group);
+        return -1;
+    }
+    GX2InitFetchShaderEx(&group->packedFetchShader, group->packedFetchShader.program,
+        group->numAttributes, packedAttributes, GX2_FETCH_SHADER_TESSELLATION_NONE, GX2_TESSELLATION_MODE_DISCRETE);
+
     // invalidate all programs
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_SHADER, group->vertexShader.program, group->vertexShader.size);
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_SHADER, group->pixelShader.program, group->pixelShader.size);
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_SHADER, group->fetchShader.program, group->fetchShader.size);
+    GX2Invalidate(GX2_INVALIDATE_MODE_CPU_SHADER, group->packedFetchShader.program, group->packedFetchShader.size);
 
     return 0;
 }
@@ -516,6 +542,7 @@ void gx2FreeShaderGroup(struct ShaderGroup *group) {
     free(group->vertexShader.program);
     free(group->pixelShader.program);
     free(group->fetchShader.program);
+    free(group->packedFetchShader.program);
 }
 
 #endif

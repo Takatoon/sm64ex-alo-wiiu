@@ -432,6 +432,9 @@ u64 *synthesis_save_reverb_samples(u64 *cmd, s16 reverbIndex, s16 updateIndex) {
 
 #ifdef VERSION_EU
 u64 *synthesis_do_one_audio_update(s16 *aiBuf, s32 bufLen, u64 *cmd, s32 updateIndex) {
+#ifdef WIIU_MINIMAP
+    mixer_gamepad_chunk(aiBuf, bufLen, DMEM_ADDR_LEFT_CH, DMEM_ADDR_RIGHT_CH);
+#endif
     struct NoteSubEu *noteSubEu;
     u8 noteIndices[56];
     s32 temp;
@@ -506,6 +509,9 @@ u64 *synthesis_do_one_audio_update(s16 *aiBuf, s32 bufLen, u64 *cmd, s32 updateI
 }
 #else
 u64 *synthesis_do_one_audio_update(s16 *aiBuf, s32 bufLen, u64 *cmd, s32 updateIndex) {
+#ifdef WIIU_MINIMAP
+    mixer_gamepad_chunk(aiBuf, bufLen, DMEM_ADDR_LEFT_CH, DMEM_ADDR_RIGHT_CH);
+#endif
     UNUSED s32 pad1[1];
     s16 ra;
     s16 t4;
@@ -1057,6 +1063,9 @@ u64 *synthesis_process_notes(s16 *aiBuf, s32 bufLen, u64 *cmd) {
                 leftRight = 0;
             }
 
+#ifdef TARGET_WII_U
+            mixer_gamepad_note_begin(note->gamepadAlert);
+#endif
 #ifdef VERSION_EU
             cmd = process_envelope(cmd, noteSubEu, synthesisState, bufLen, 0, leftRight, flags);
 #else
@@ -1071,6 +1080,9 @@ u64 *synthesis_process_notes(s16 *aiBuf, s32 bufLen, u64 *cmd) {
             if (note->usesHeadsetPanEffects) {
                 cmd = note_apply_headset_pan_effects(cmd, note, bufLen * 2, flags, leftRight);
             }
+#endif
+#ifdef TARGET_WII_U
+            mixer_gamepad_note_end();
 #endif
         }
 #ifndef VERSION_EU

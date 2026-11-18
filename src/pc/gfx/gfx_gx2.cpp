@@ -8,6 +8,9 @@
 #include <math.h>
 
 #include <vector>
+#ifdef WIIU_LOAD_TIMING_PROFILE
+#include <coreinit/time.h>
+#endif
 
 #ifndef _LANGUAGE_C
 #define _LANGUAGE_C
@@ -58,6 +61,12 @@ static struct ShaderProgram shader_program_pool[64];
 static uint8_t shader_program_pool_size = 0;
 
 static struct ShaderProgram* current_shader_program = nullptr;
+static bool packed_colors = true;
+static bool indexed_geometry;
+
+extern "C" bool gfx_gx2_packed_colors(void) { return packed_colors; }
+extern "C" bool gfx_gx2_indexed(void) { return indexed_geometry; }
+extern "C" void gfx_gx2_set_indexed(bool enabled) { indexed_geometry = enabled; }
 
 struct VboBlock
 {
@@ -69,6 +78,13 @@ struct VboBlock
 static std::vector<VboBlock> vbo_blocks;
 static size_t current_vbo_block = 0;
 static const size_t VBO_BLOCK_SIZE = 1024 * 1024;
+
+#ifdef WIIU_LOAD_TIMING_PROFILE
+struct WiiUGx2FrameProfile gfx_gx2_frame_profile = {};
+uint64_t gfx_gx2_profile_ticks_to_us(uint64_t ticks) {
+    return OSTicksToMicroseconds(ticks);
+}
+#endif
 
 static std::vector<Texture> gx2_textures;
 static uint8_t current_tile = 0;
@@ -175,11 +191,16 @@ static void gfx_gx2_load_shader(struct ShaderProgram* new_prg)
     if (!new_prg)
         return;
 
-    GX2SetFetchShader(&new_prg->group.fetchShader);
+    GX2SetFetchShader(packed_colors ? &new_prg->group.packedFetchShader : &new_prg->group.fetchShader);
     GX2SetVertexShader(&new_prg->group.vertexShader);
     GX2SetPixelShader(&new_prg->group.pixelShader);
 
     gfx_gx2_set_uniforms(new_prg);
+}
+
+extern "C" void gfx_gx2_set_packed_colors(bool enabled)
+{
+    packed_colors = enabled;
 }
 
 static struct ShaderProgram* gfx_gx2_create_and_load_new_shader(uint32_t shader_id)
@@ -457,18 +478,86 @@ static void gfx_gx2_set_use_alpha(bool use_alpha)
     }
 }
 
-static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris)
+static VboBlock *gfx_gx2_reserve_vbo(size_t bytes)
+{
+    const size_t first_block = current_vbo_block;
+    while (current_vbo_block < vbo_blocks.size())
+    {
+        VboBlock& block = vbo_blocks[current_vbo_block];
+        size_t aligned_used = (block.used + 0x3F) & ~((size_t)0x3F);
+        if (aligned_used <= block.capacity && bytes <= block.capacity - aligned_used)
+        {
+            block.used = aligned_used;
+            return &block;
+        }
+        ++current_vbo_block;
+    }
+
+    if (bytes > SIZE_MAX - 0x3F) {
+        current_vbo_block = first_block;
+        return nullptr;
+    }
+    size_t capacity = bytes > VBO_BLOCK_SIZE
+        ? (bytes + 0x3F) & ~((size_t)0x3F) : VBO_BLOCK_SIZE;
+    uint8_t* data = static_cast<uint8_t*>(memalign(0x40, capacity));
+    if (!data) {
+        // A failed full-capacity reservation must still let the copy fallback
+        // use a smaller batch in the remaining space of an existing block.
+        current_vbo_block = first_block;
+        return nullptr;
+    }
+    vbo_blocks.push_back({data, capacity, 0});
+    current_vbo_block = vbo_blocks.size() - 1;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    ++gfx_gx2_frame_profile.allocations;
+#endif
+    return &vbo_blocks[current_vbo_block];
+}
+
+extern "C" float *gfx_gx2_reserve_vertices(size_t float_capacity)
+{
+    if (float_capacity == 0 || float_capacity > SIZE_MAX / sizeof(float)) return nullptr;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime begin = OSGetTime();
+#endif
+    VboBlock *block = gfx_gx2_reserve_vbo(float_capacity * sizeof(float));
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_STORAGE] += OSGetTime() - begin;
+#endif
+    // Reserve capacity without committing it. Small material batches consume
+    // only their actual length; the remaining space stays available.
+    return block ? reinterpret_cast<float*>(block->data + block->used) : nullptr;
+}
+
+#ifdef WIIU_LOAD_TIMING_PROFILE
+extern "C" size_t gfx_gx2_vbo_reserved_bytes(void)
+{
+    size_t bytes = 0;
+    for (const VboBlock& block : vbo_blocks)
+        bytes += block.capacity;
+    return bytes;
+}
+#endif
+
+static void gfx_gx2_submit_triangles(float buf_vbo[], size_t buf_vbo_len,
+        size_t buf_vbo_num_tris, const uint16_t *indices)
 {
     if (!current_shader_program)
         return;
 
+    const size_t stride = packed_colors
+        ? current_shader_program->group.packedVertexStride / sizeof(float)
+        : current_shader_program->num_floats;
+
 #ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime validation_begin = OSGetTime();
     // Distinguish corrupt CPU geometry from visibility/cache issues on GX2.
     // Large finite clip coordinates can be valid: do not impose a size cutoff.
     static unsigned int invalid_batches = 0;
-    const size_t stride = current_shader_program->num_floats;
     bool valid = stride >= 4 && buf_vbo_len % stride == 0 &&
-                 buf_vbo_len / stride == buf_vbo_num_tris * 3;
+                 (indices ? buf_vbo_len / stride > 0 &&
+                            buf_vbo_len / stride <= buf_vbo_num_tris * 3 :
+                            buf_vbo_len / stride == buf_vbo_num_tris * 3);
     size_t bad_vertex = 0;
     if (valid)
     {
@@ -483,6 +572,17 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
             }
         }
     }
+    if (valid && indices) {
+        for (size_t i = 0; i < buf_vbo_num_tris * 3; ++i) {
+            if (indices[i] >= buf_vbo_len / stride) {
+                valid = false;
+                bad_vertex = indices[i];
+                break;
+            }
+        }
+    }
+    const OSTime storage_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_VALIDATE] += storage_begin - validation_begin;
     if (!valid)
     {
         if (invalid_batches++ < 8)
@@ -496,43 +596,78 @@ static void gfx_gx2_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t b
 
     size_t vbo_len = sizeof(float) * buf_vbo_len;
     VboBlock* block = nullptr;
-
-    while (current_vbo_block < vbo_blocks.size())
+    bool direct = false;
+    if (current_vbo_block < vbo_blocks.size())
     {
         VboBlock& candidate = vbo_blocks[current_vbo_block];
-        size_t aligned_used = (candidate.used + 0x3F) & ~((size_t)0x3F);
-        if (aligned_used + vbo_len <= candidate.capacity)
+        if (buf_vbo == reinterpret_cast<float*>(candidate.data + candidate.used) &&
+            vbo_len <= candidate.capacity - candidate.used)
         {
-            candidate.used = aligned_used;
             block = &candidate;
-            break;
+            direct = true;
         }
-        current_vbo_block++;
     }
-
-    if (!block)
-    {
-        size_t capacity = vbo_len > VBO_BLOCK_SIZE
-            ? (vbo_len + 0x3F) & ~((size_t)0x3F)
-            : VBO_BLOCK_SIZE;
-        uint8_t* data = static_cast<uint8_t*>(memalign(0x40, capacity));
-        if (!data)
-            return;
-        vbo_blocks.push_back({data, capacity, 0});
-        current_vbo_block = vbo_blocks.size() - 1;
-        block = &vbo_blocks[current_vbo_block];
-    }
+    if (!block) block = gfx_gx2_reserve_vbo(vbo_len);
+    if (!block) return;
 
     float* new_vbo = reinterpret_cast<float*>(block->data + block->used);
-    memcpy(new_vbo, buf_vbo, vbo_len);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime copy_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_STORAGE] += copy_begin - storage_begin;
+#endif
+    if (!direct) memcpy(new_vbo, buf_vbo, vbo_len);
     block->used += vbo_len;
+    uint16_t *new_indices = nullptr;
+    const size_t index_bytes = indices ? buf_vbo_num_tris * 3 * sizeof(uint16_t) : 0;
+    if (indices) {
+        VboBlock *index_block = gfx_gx2_reserve_vbo(index_bytes);
+        if (!index_block) return;
+        new_indices = reinterpret_cast<uint16_t*>(index_block->data + index_block->used);
+        memcpy(new_indices, indices, index_bytes);
+        index_block->used += index_bytes;
+    }
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime publish_begin = OSGetTime();
+    if (!direct || indices) gfx_gx2_frame_profile.ticks[WIIU_GX2_COPY] += publish_begin - copy_begin;
+    if (direct) ++gfx_gx2_frame_profile.direct_draws;
+    else ++gfx_gx2_frame_profile.copied_draws;
+    gfx_gx2_frame_profile.vbo_bytes += vbo_len;
+    gfx_gx2_frame_profile.ibo_bytes += index_bytes;
+    gfx_gx2_frame_profile.submitted_vertices += buf_vbo_len / stride;
+    if (indices) ++gfx_gx2_frame_profile.indexed_draws;
+    ++gfx_gx2_frame_profile.draw_calls;
+#endif
 
     // Publish CPU writes and invalidate cached GPU attributes BEFORE queuing
     // their draw. An end-of-frame invalidate is too late if GX2 has already
     // submitted/consumed an earlier command-buffer segment.
     GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_vbo, vbo_len);
-    GX2SetAttribBuffer(0, vbo_len, sizeof(float) * current_shader_program->num_floats, new_vbo);
-    GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
+    if (new_indices)
+        GX2Invalidate(GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER, new_indices, index_bytes);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime draw_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_PUBLISH] += draw_begin - publish_begin;
+#endif
+    GX2SetAttribBuffer(0, vbo_len, sizeof(float) * stride, new_vbo);
+    if (new_indices)
+        GX2DrawIndexedEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris,
+                        GX2_INDEX_TYPE_U16, new_indices, 0, 1);
+    else
+        GX2DrawEx(GX2_PRIMITIVE_MODE_TRIANGLES, 3 * buf_vbo_num_tris, 0, 1);
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_DRAW] += OSGetTime() - draw_begin;
+#endif
+}
+
+static void gfx_gx2_draw_triangles(float buf_vbo[], size_t float_count, size_t triangles)
+{
+    gfx_gx2_submit_triangles(buf_vbo, float_count, triangles, nullptr);
+}
+
+extern "C" void gfx_gx2_draw_indexed(float *vertices, size_t float_count,
+        const uint16_t *indices, size_t triangles)
+{
+    gfx_gx2_submit_triangles(vertices, float_count, triangles, indices);
 }
 
 static void gfx_gx2_get_framebuffer(uint16_t *buffer) {
@@ -540,7 +675,7 @@ static void gfx_gx2_get_framebuffer(uint16_t *buffer) {
 
 static void gfx_gx2_init(void) 
 {
-    WHBLogPrint("GX2_VBO_COHERENCY mode=before_draw");
+    WHBLogPrint("GX2_VBO_COHERENCY mode=before_draw vertices=direct");
 }
 
 static void gfx_gx2_on_resize(void) 
@@ -554,9 +689,15 @@ static void gfx_gx2_start_frame(void)
 
 static void gfx_gx2_end_frame(void) 
 {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime begin = OSGetTime();
+#endif
     // Retain the frame-boundary flush as well; correctness now relies on the
     // per-draw publication above, not on commands staying pending until here.
     gfx_gx2_flush_vbo_cache();
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_BOUNDARY] += OSGetTime() - begin;
+#endif
 }
 
 extern "C" void gfx_gx2_flush_vbo_cache(void)
@@ -571,12 +712,22 @@ extern "C" void gfx_gx2_flush_vbo_cache(void)
 
 static void gfx_gx2_finish_render(void) 
 {
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime begin = OSGetTime();
+#endif
     // Wait until drawing is done
     GX2DrawDone();
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    const OSTime recycle_begin = OSGetTime();
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_FINISH] += recycle_begin - begin;
+#endif
     // The GPU is finished with the frame, so its VBO storage can be reused.
     for (VboBlock& block : vbo_blocks)
         block.used = 0;
     current_vbo_block = 0;
+#ifdef WIIU_LOAD_TIMING_PROFILE
+    gfx_gx2_frame_profile.ticks[WIIU_GX2_RECYCLE] += OSGetTime() - recycle_begin;
+#endif
 }
 
 static void gfx_gx2_shutdown(void) 

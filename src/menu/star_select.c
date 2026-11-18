@@ -17,6 +17,9 @@
 #include "game/segment2.h"
 #include "game/segment7.h"
 #include "sm64.h"
+#ifdef WIIU_MINIMAP
+#include "pc/wiiu_minimap.h"
+#endif
 #include "star_select.h"
 #include "text_strings.h"
 
@@ -406,6 +409,9 @@ Gfx *geo_act_selector_strings(s16 callContext, UNUSED struct GraphNode *node)
  * Also load how much stars a course has, without counting the 100 coin star.
  */
 s32 lvl_init_act_selector_values_and_stars(UNUSED s32 arg, UNUSED s32 unused) {
+#ifdef WIIU_MINIMAP
+    wiiu_minimap_set_menu_screen(WIIU_MINIMAP_MENU_MIRROR_TV);
+#endif
     u8 stars = save_file_get_star_flags(gCurrSaveFileNum - 1, COURSE_NUM_TO_INDEX(gCurrCourseNum));
 
     sLoadedActNum = 0;

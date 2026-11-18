@@ -1,7 +1,12 @@
 #ifndef GFX_PC_H
 #define GFX_PC_H
 
+#ifdef TARGET_WII_U
+/* Storage capacity; profiling selects a 256/512/1024 runtime batch limit. */
+#define MAX_BUFFERED_TRIANGLES 1024
+#else
 #define MAX_BUFFERED_TRIANGLES 256
+#endif
 #ifdef TARGET_WII_U
 #define VERTEX_BUFFER_SIZE MAX_BUFFERED_TRIANGLES * 28 * 3 // 3 vertices in a triangle and 28 floats per vtx
 #else
@@ -33,6 +38,11 @@ void gfx_precache_textures(void);
 void gfx_precache_startup_textures(void);
 void gfx_precache_level_textures(s16 level_num);
 #ifdef WIIU_LOAD_TIMING_PROFILE
+void gfx_profile_set_interpolated(bool interpolated);
+void gfx_profile_begin_tick(bool interpolated);
+bool gfx_profile_ab_keep_awake(void);
+void gfx_profile_toggle_geometry(void);
+const char *gfx_profile_geometry_indicator(void);
 void gfx_load_timing_begin_level(s16 level_num, const char *source);
 void gfx_load_timing_begin_init(s16 level_num);
 void gfx_load_timing_level_ready(s16 level_num);

@@ -471,6 +471,14 @@ fs_pathlist_t fs_texture_packs(void) {
         if(dir->texture_pack&&!enumerate_walk(&list,dir->realpath)){fs_pathlist_free(&list);break;}
     return list;
 }
+#ifdef WIIU_MINIMAP
+static uint32_t texture_pack_generation;
+
+uint32_t fs_texture_pack_generation(void) {
+    return texture_pack_generation;
+}
+
+#endif
 bool fs_set_texture_pack(const char *realpath) {
     if(realpath&&*realpath){
         fs_dir_t *dir=fs_find_dir(realpath);
@@ -479,6 +487,9 @@ bool fs_set_texture_pack(const char *realpath) {
     texture_all=realpath==NULL;
     snprintf(texture_selected,sizeof(texture_selected),"%s",realpath?realpath:"");
     texture_policy_active=true;
+#ifdef WIIU_MINIMAP
+    ++texture_pack_generation;
+#endif
     return true;
 }
 
@@ -511,6 +522,38 @@ const char *fs_readline(fs_file_t *file, char *dst, uint64_t size) {
     return p;
 }
 
+#ifdef WIIU_MINIMAP
+void *fs_load_file_variant(const char *anchor, const char *variant,
+                           uint64_t *outsize, uint64_t limit) {
+    if (outsize) *outsize = 0;
+    if (!anchor || !variant) return NULL;
+    for (fs_dir_t *dir = next_for_path(NULL, anchor); dir; dir = next_for_path(dir, anchor)) {
+        if (!dir->packer->is_file(dir->pack, anchor)) continue;
+        fs_file_t *file = dir->packer->open(dir->pack, variant);
+        if (!file) {
+            return NULL;
+        }
+        file->parent = dir;
+        int64_t size = fs_size(file);
+        if (size <= 0 || (uint64_t)size > limit || (uint64_t)size > SIZE_MAX) {
+            fs_close(file); return NULL;
+        }
+        void *buffer = malloc((size_t)size);
+        if (!buffer) {
+            fs_close(file); return NULL;
+        }
+        int64_t read = fs_read(file, buffer, (uint64_t)size);
+        fs_close(file);
+        if (read != size) {
+            free(buffer); return NULL;
+        }
+        if (outsize) *outsize = (uint64_t)size;
+        return buffer;
+    }
+    return NULL;
+}
+
+#endif
 void *fs_load_file(const char *vpath, uint64_t *outsize) {
 #ifdef TARGET_WII_U
     void *fast_buffer = NULL;

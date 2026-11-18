@@ -83,6 +83,7 @@ sm64config.txt
 
 # Android files
 !/textures/touchcontrols/*.png
+!/textures/minimap/theme/*.png
 platform/android/SDL/include
 !platform/android/android/**/*.so
 platform/android/android/lib/*/libc++_shared.so

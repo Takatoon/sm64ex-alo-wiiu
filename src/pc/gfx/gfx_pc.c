@@ -22,6 +22,7 @@
 #include "game/game_init.h"
 #include "game/level_update.h"
 #include "game/object_list_processor.h"
+#include "game/ingame_menu.h"
 #endif
 
 #ifdef EXTERNAL_DATA
@@ -56,9 +57,16 @@
 #ifdef TARGET_N3DS
 #include "gfx_3ds.h"
 #endif
+#ifdef TARGET_WII_U
+#include "wiiu_vertex_format.h"
+#include "wiiu_vertex_cache.h"
+#endif
 
 #include "../platform.h"
 #include "../configfile.h"
+#ifdef TARGET_WII_U
+#include "../pc_main.h"
+#endif
 #include "../fs/fs.h"
 
 #include "macros.h"
@@ -175,6 +183,7 @@ static struct {
     uint32_t draw_calls;
     uint32_t triangles;
     uint32_t frames;
+    uint32_t interval_count;
     uint64_t interval_sum_us;
     uint64_t previous_present_us;
     uint64_t total_sum_us;
@@ -299,11 +308,39 @@ static struct RenderingState {
     struct TextureHashmapNode *textures[2];
 } rendering_state;
 
+#ifdef TARGET_WII_U
+// Reuse material setup across triangle/vertex commands. The DL dispatcher
+// invalidates this on every other command, including nested display lists.
+static struct {
+    bool valid;
+    struct ColorCombiner *comb;
+    uint8_t num_inputs;
+    bool use_alpha, use_fog, use_texture, z_is_from_0_to_1;
+    uint32_t tex_width, tex_height;
+    bool attributes_valid, needs_lod;
+    uint8_t rgb_kind[4], alpha_kind[4];
+    float constant_rgb[4][3], constant_alpha[4], fog_rgb[3];
+} triangle_state;
+static struct WiiUVertexCache vertex_reuse;
+static uint16_t buf_indices[MAX_BUFFERED_TRIANGLES * 3];
+static size_t buf_unique_vertices;
+static bool buf_vbo_indexed;
+static unsigned buf_triangle_limit = 256;
+#define GFX_TRIANGLE_LIMIT buf_triangle_limit
+#else
+#define GFX_TRIANGLE_LIMIT MAX_BUFFERED_TRIANGLES
+#endif
+
 struct GfxDimensions gfx_current_dimensions;
 
 static bool dropped_frame;
 
+#ifdef TARGET_WII_U
+static float buf_vbo_fallback[VERTEX_BUFFER_SIZE];
+static float *buf_vbo = buf_vbo_fallback;
+#else
 static float buf_vbo[VERTEX_BUFFER_SIZE];
+#endif
 static size_t buf_vbo_len;
 static size_t buf_vbo_num_tris;
 
@@ -368,13 +405,132 @@ static void gfx_set_iod(unsigned int iod)
 }
 #endif
 
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+static struct {
+    uint64_t vertex_us, submit_us, vertex_sum_us, submit_sum_us;
+    uint64_t vertices_sum, batches_sum, full_flushes_sum, material_prepares_sum, uniform_prepares_sum;
+    unsigned vertices, batches, full_flushes, material_prepares, uniform_prepares;
+} model_geometry_profile;
+
+static bool gfx_profile_interpolated;
+static bool geometry_profile_awake;
+static bool geometry_ab_measure;
+static unsigned geometry_buffer_choice, geometry_buffer_steps;
+void gfx_profile_toggle_geometry(void) {
+    geometry_buffer_steps = (geometry_buffer_steps + 1) % 3;
+}
+const char *gfx_profile_geometry_indicator(void) {
+    return buf_triangle_limit == 1024 ? "B 1024" :
+           buf_triangle_limit == 512 ? "B 512" : "B 256";
+}
+static void gfx_profile_ab_update(void);
+bool gfx_profile_ab_keep_awake(void) {
+    // Keep a stationary profiling view from changing when Mario falls asleep.
+    return geometry_profile_awake;
+}
+void gfx_profile_set_interpolated(bool interpolated) {
+    gfx_profile_interpolated = interpolated;
+}
+void gfx_profile_begin_tick(bool interpolated) {
+    gfx_profile_ab_update();
+    gfx_profile_set_interpolated(interpolated);
+}
+
+struct ModelPhaseProfile {
+    unsigned frames, slow_intervals;
+    uint64_t total_us, pre_us, dl_us, vertex_us, submit_us;
+    uint64_t audio_us, post_us, finish_us, present_us;
+    uint64_t max_total_us, max_finish_us;
+    uint64_t draws, triangles;
+    struct WiiUGx2FrameProfile backend;
+};
+static struct ModelPhaseProfile model_phase_profile[2];
+
+static unsigned long long gfx_profile_avg_ticks(uint64_t ticks, unsigned frames) {
+    return (unsigned long long)(gfx_gx2_profile_ticks_to_us(ticks) / frames);
+}
+
+static void gfx_profile_report_phases(unsigned window, int level, unsigned model) {
+    for (unsigned i = 0; i < 2; ++i) {
+        const struct ModelPhaseProfile *p = &model_phase_profile[i];
+        if (p->frames == 0) continue;
+        const char *phase = i ? "interpolated" : "current";
+#define PHASE_AVG(field) (unsigned long long)(p->field / p->frames)
+        WHBLogPrintf("MODEL_PHASE revision=11 window=%u level=%d model=%u phase=%s frames=%u slow_intervals=%u avg_total_us=%llu max_total_us=%llu avg_pre_us=%llu avg_dl_us=%llu avg_vertex_us=%llu avg_submit_us=%llu avg_audio_us=%llu avg_post_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu avg_draws=%llu avg_triangles=%llu",
+            window, level, model, phase, p->frames, p->slow_intervals,
+            PHASE_AVG(total_us), (unsigned long long)p->max_total_us,
+            PHASE_AVG(pre_us), PHASE_AVG(dl_us), PHASE_AVG(vertex_us),
+            PHASE_AVG(submit_us), PHASE_AVG(audio_us), PHASE_AVG(post_us),
+            PHASE_AVG(finish_us), (unsigned long long)p->max_finish_us,
+            PHASE_AVG(present_us), PHASE_AVG(draws), PHASE_AVG(triangles));
+#undef PHASE_AVG
+#define BACKEND_AVG(metric) gfx_profile_avg_ticks(p->backend.ticks[WIIU_GX2_##metric], p->frames)
+        WHBLogPrintf("MODEL_GX2 revision=11 window=%u phase=%s frames=%u avg_validate_us=%llu avg_storage_us=%llu avg_copy_us=%llu avg_publish_us=%llu avg_draw_us=%llu avg_boundary_us=%llu avg_draw_done_us=%llu avg_recycle_us=%llu avg_tv_us=%llu avg_drc_us=%llu avg_swap_us=%llu avg_vsync_us=%llu avg_mode_us=%llu avg_vbo_bytes=%llu allocations=%u draws=%u vsync_waits=%u direct_draws=%u copied_draws=%u avg_ibo_bytes=%llu avg_unique_vertices=%llu indexed_draws=%u",
+            window, phase, p->frames,
+            BACKEND_AVG(VALIDATE), BACKEND_AVG(STORAGE), BACKEND_AVG(COPY),
+            BACKEND_AVG(PUBLISH), BACKEND_AVG(DRAW), BACKEND_AVG(BOUNDARY),
+            BACKEND_AVG(FINISH), BACKEND_AVG(RECYCLE), BACKEND_AVG(TV),
+            BACKEND_AVG(DRC), BACKEND_AVG(SWAP), BACKEND_AVG(PRESENT),
+            BACKEND_AVG(VIDEO_MODE),
+            (unsigned long long)(p->backend.vbo_bytes / p->frames),
+            p->backend.allocations, p->backend.draw_calls, p->backend.vsync_waits,
+            p->backend.direct_draws, p->backend.copied_draws,
+            (unsigned long long)(p->backend.ibo_bytes / p->frames),
+            (unsigned long long)(p->backend.submitted_vertices / p->frames),
+            p->backend.indexed_draws);
+#undef BACKEND_AVG
+    }
+}
+
+static void gfx_profile_ab_clear_window(void) {
+    memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+    memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+    memset(model_phase_profile, 0, sizeof(model_phase_profile));
+}
+
+static void gfx_profile_ab_update(void) {
+    static bool announced;
+    static unsigned previous_rate;
+    static const unsigned limits[] = {256, 512, 1024};
+    const unsigned target_rate = (unsigned)(30.0f * pc_get_render_frame_multiplier());
+    if (geometry_buffer_steps || !announced || target_rate != previous_rate) {
+        geometry_buffer_choice = (geometry_buffer_choice + geometry_buffer_steps) % 3;
+        geometry_buffer_steps = 0;
+        buf_triangle_limit = limits[geometry_buffer_choice];
+        gfx_profile_ab_clear_window();
+        WHBLogPrintf("MODEL_BUFFER revision=11 experiment=batch_capacity control=manual event=select triangles=%u target_fps=%u packed_colors=1 indexed=1",
+            buf_triangle_limit, target_rate);
+        announced = true;
+        previous_rate = target_rate;
+    }
+    // Once per logical update, before its first image; no pending GPU work
+    // changes format. The arena retains every previous in-flight batch.
+    gfx_gx2_set_packed_colors(true);
+    gfx_gx2_set_indexed(true);
+    geometry_ab_measure = true;
+    geometry_profile_awake = gCurrentArea != NULL && gMarioState != NULL;
+}
+
+#endif
+
 static void gfx_flush(void) {
     if (buf_vbo_len > 0) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
         gfx_vcutm_profile.draw_calls++;
         gfx_vcutm_profile.triangles += (uint32_t) buf_vbo_num_tris;
+        const uint64_t submit_begin_us = osGetTime();
+        if (buf_vbo_num_tris == GFX_TRIANGLE_LIMIT)
+            ++model_geometry_profile.full_flushes;
 #endif
-        gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
+#ifdef TARGET_WII_U
+        if (buf_vbo_indexed)
+            gfx_gx2_draw_indexed(buf_vbo, buf_vbo_len, buf_indices, buf_vbo_num_tris);
+        else
+#endif
+            gfx_rapi->draw_triangles(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+        model_geometry_profile.submit_us += osGetTime() - submit_begin_us;
+#endif
         buf_vbo_len = 0;
         buf_vbo_num_tris = 0;
     }
@@ -1194,6 +1350,30 @@ static float gfx_adjust_x_for_aspect_ratio(float x) {
 }
 
 static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
+#ifdef TARGET_WII_U
+    if (gfx_gx2_indexed())
+        wiiu_vertex_cache_reload(&vertex_reuse, dest_index, n_vertices);
+#endif
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    const uint64_t vertex_begin_us = osGetTime();
+    model_geometry_profile.vertices += n_vertices;
+    ++model_geometry_profile.batches;
+#endif
+    // These values and light directions are constant for the entire load.
+    const float aspect_ratio = (float)gfx_current_dimensions.width / (float)gfx_current_dimensions.height;
+    const bool lighting = (rsp.geometry_mode & G_LIGHTING) != 0;
+    const bool texture_gen = (rsp.geometry_mode & G_TEXTURE_GEN) != 0;
+    const bool fog = (rsp.geometry_mode & G_FOG) != 0;
+    if (n_vertices != 0 && lighting && rsp.lights_changed) {
+        for (int i = 0; i < rsp.current_num_lights - 1; i++) {
+            calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
+        }
+        static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0};
+        static const Light_t lookat_y = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
+        calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
+        calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
+        rsp.lights_changed = false;
+    }
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const Vtx_t *v = &vertices[i].v;
         const Vtx_tn *vn = &vertices[i].n;
@@ -1204,23 +1384,12 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         float z = v->ob[0] * rsp.MP_matrix[0][2] + v->ob[1] * rsp.MP_matrix[1][2] + v->ob[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
         float w = v->ob[0] * rsp.MP_matrix[0][3] + v->ob[1] * rsp.MP_matrix[1][3] + v->ob[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
 
-        x = gfx_adjust_x_for_aspect_ratio(x);
+        x = x * (4.0f / 3.0f) / aspect_ratio;
 
         short U = v->tc[0] * rsp.texture_scaling_factor.s >> 16;
         short V = v->tc[1] * rsp.texture_scaling_factor.t >> 16;
 
-        if (rsp.geometry_mode & G_LIGHTING) {
-            if (rsp.lights_changed) {
-                for (int i = 0; i < rsp.current_num_lights - 1; i++) {
-                    calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
-                }
-                static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0};
-                static const Light_t lookat_y = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
-                calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
-                calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
-                rsp.lights_changed = false;
-            }
-
+        if (lighting) {
             const bool useFirstColor = (dest_index & 1) == 0;
             const unsigned char* col = useFirstColor ? rsp.current_lights[rsp.current_num_lights - 1].col : rsp.current_lights[rsp.current_num_lights - 1].colc;
             int r = col[0];
@@ -1245,7 +1414,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             d->color.g = g > 255 ? 255 : g;
             d->color.b = b > 255 ? 255 : b;
 
-            if (rsp.geometry_mode & G_TEXTURE_GEN) {
+            if (texture_gen) {
                 float dotx = 0, doty = 0;
                 dotx += vn->n[0] * rsp.current_lookat_coeffs[0][0];
                 dotx += vn->n[1] * rsp.current_lookat_coeffs[0][1];
@@ -1296,7 +1465,7 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         d->z = z;
         d->w = w;
 
-        if (rsp.geometry_mode & G_FOG) {
+        if (fog) {
             if (fabsf(w) < 0.001f) {
                 // To avoid division by zero
                 w = 0.001f;
@@ -1315,7 +1484,44 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             d->color.a = v->cn[3];
         }
     }
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    model_geometry_profile.vertex_us += osGetTime() - vertex_begin_us;
+#endif
 }
+
+#ifdef TARGET_WII_U
+static void gfx_prepare_material_values(struct ColorCombiner *comb, uint8_t num_inputs,
+        bool use_alpha, bool use_fog) {
+    wiiu_vertex_cache_material(&vertex_reuse);
+#if defined(EXTERNAL_DATA) && defined(WIIU_LOAD_TIMING_PROFILE)
+    ++model_geometry_profile.uniform_prepares;
+#endif
+    triangle_state.needs_lod = false;
+    for (unsigned j = 0; j < num_inputs; ++j) {
+        uint8_t rgb = comb->shader_input_mapping[0][j];
+        uint8_t alpha = comb->shader_input_mapping[1][j];
+        triangle_state.rgb_kind[j] = rgb;
+        triangle_state.alpha_kind[j] = alpha;
+        const struct RGBA *color = rgb == CC_PRIM ? &rdp.prim_color :
+                                   rgb == CC_ENV ? &rdp.env_color : NULL;
+        triangle_state.constant_rgb[j][0] = color ? color->r / 255.0f : 0.0f;
+        triangle_state.constant_rgb[j][1] = color ? color->g / 255.0f : 0.0f;
+        triangle_state.constant_rgb[j][2] = color ? color->b / 255.0f : 0.0f;
+        if (use_alpha) {
+            color = alpha == CC_PRIM ? &rdp.prim_color :
+                    alpha == CC_ENV ? &rdp.env_color : NULL;
+            triangle_state.constant_alpha[j] = color ? color->a / 255.0f : 0.0f;
+        }
+        triangle_state.needs_lod |= rgb == CC_LOD || (use_alpha && alpha == CC_LOD);
+    }
+    if (use_fog) {
+        triangle_state.fog_rgb[0] = rdp.fog_color.r / 255.0f;
+        triangle_state.fog_rgb[1] = rdp.fog_color.g / 255.0f;
+        triangle_state.fog_rgb[2] = rdp.fog_color.b / 255.0f;
+    }
+    triangle_state.attributes_valid = true;
+}
+#endif
 
 static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     struct LoadedVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
@@ -1356,6 +1562,17 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         }
     }
 
+    struct ColorCombiner *comb;
+    uint8_t num_inputs;
+    bool use_alpha, use_fog, use_texture, z_is_from_0_to_1;
+    uint32_t tex_width, tex_height;
+#ifdef TARGET_WII_U
+    if (!triangle_state.valid) {
+        triangle_state.attributes_valid = false;
+#endif
+#if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    ++model_geometry_profile.material_prepares;
+#endif
     bool depth_test = (rsp.geometry_mode & G_ZBUFFER) == G_ZBUFFER;
     if (depth_test != rendering_state.depth_test) {
         gfx_flush();
@@ -1393,8 +1610,8 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
 
     uint32_t cc_id = rdp.combine_mode;
 
-    bool use_alpha = (rdp.other_mode_l & (G_BL_A_MEM << 18)) == 0;
-    bool use_fog = (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
+    use_alpha = (rdp.other_mode_l & (G_BL_A_MEM << 18)) == 0;
+    use_fog = (rdp.other_mode_l >> 30) == G_BL_CLR_FOG;
     bool texture_edge = (rdp.other_mode_l & CVG_X_ALPHA) == CVG_X_ALPHA;
     bool use_noise = (rdp.other_mode_l & G_AC_DITHER) == G_AC_DITHER;
 
@@ -1411,7 +1628,7 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         cc_id &= ~0xfff000;
     }
 
-    struct ColorCombiner *comb = gfx_lookup_or_create_color_combiner(cc_id);
+    comb = gfx_lookup_or_create_color_combiner(cc_id);
     struct ShaderProgram *prg = comb->prg;
     if (prg != rendering_state.shader_program) {
         gfx_flush();
@@ -1424,7 +1641,6 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         gfx_rapi->set_use_alpha(use_alpha);
         rendering_state.alpha_blend = use_alpha;
     }
-    uint8_t num_inputs;
     bool used_textures[2];
     gfx_rapi->shader_get_info(prg, &num_inputs, used_textures);
 
@@ -1458,105 +1674,88 @@ retry_texture_bindings:;
     if (texture_generation != gfx_texture_cache_generation) goto retry_texture_bindings;
 #endif
 
-    bool use_texture = used_textures[0] || used_textures[1];
-    uint32_t tex_width = (rdp.texture_tile.lrs - rdp.texture_tile.uls + 4) / 4;
-    uint32_t tex_height = (rdp.texture_tile.lrt - rdp.texture_tile.ult + 4) / 4;
+    use_texture = used_textures[0] || used_textures[1];
+    tex_width = (rdp.texture_tile.lrs - rdp.texture_tile.uls + 4) / 4;
+    tex_height = (rdp.texture_tile.lrt - rdp.texture_tile.ult + 4) / 4;
 
-    bool z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
-
-    for (int i = 0; i < 3; i++) {
-        float z = v_arr[i]->z, w = v_arr[i]->w;
-        if (z_is_from_0_to_1) {
-            z = (z + w) / 2.0f;
-        }
-
-        buf_vbo[buf_vbo_len++] = v_arr[i]->x;
-        buf_vbo[buf_vbo_len++] = v_arr[i]->y;
-#ifdef TARGET_N3DS
-        buf_vbo[buf_vbo_len++] = -z;
-#else
-        buf_vbo[buf_vbo_len++] = z;
-#endif
-        buf_vbo[buf_vbo_len++] = w;
-
-        if (use_texture) {
-            float u = (v_arr[i]->u - rdp.texture_tile.uls * 8) / 32.0f;
-            float v = (v_arr[i]->v - rdp.texture_tile.ult * 8) / 32.0f;
-            if ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT) {
-                // Linear filter adds 0.5f to the coordinates
-                u += 0.5f;
-                v += 0.5f;
-            }
-            buf_vbo[buf_vbo_len++] = u / tex_width;
-            buf_vbo[buf_vbo_len++] = v / tex_height;
+    z_is_from_0_to_1 = gfx_rapi->z_is_from_0_to_1();
 #ifdef TARGET_WII_U
-            // Padding for faster GPU reading
-            buf_vbo[buf_vbo_len++] = 0.0f;
-            buf_vbo[buf_vbo_len++] = 0.0f;
-#endif
-        }
-#ifndef TARGET_N3DS
-        if (use_fog) {
-            buf_vbo[buf_vbo_len++] = rdp.fog_color.r / 255.0f;
-            buf_vbo[buf_vbo_len++] = rdp.fog_color.g / 255.0f;
-            buf_vbo[buf_vbo_len++] = rdp.fog_color.b / 255.0f;
-            buf_vbo[buf_vbo_len++] = v_arr[i]->color.a / 255.0f; // fog factor (not alpha)
-        }
-#endif
-        for (int j = 0; j < num_inputs; j++) {
-            struct RGBA *color;
-            struct RGBA tmp;
-            for (int k = 0; k < 1 + (use_alpha ? 1 : 0); k++) {
-                switch (comb->shader_input_mapping[k][j]) {
-                    case CC_PRIM:
-                        color = &rdp.prim_color;
-                        break;
-                    case CC_SHADE:
-                        color = &v_arr[i]->color;
-                        break;
-                    case CC_ENV:
-                        color = &rdp.env_color;
-                        break;
-                    case CC_LOD:
-                    {
-                        float distance_frac = (v1->w - 3000.0f) / 3000.0f;
-                        if (distance_frac < 0.0f) distance_frac = 0.0f;
-                        if (distance_frac > 1.0f) distance_frac = 1.0f;
-                        tmp.r = tmp.g = tmp.b = tmp.a = distance_frac * 255.0f;
-                        color = &tmp;
-                        break;
-                    }
-                    default:
-                        memset(&tmp, 0, sizeof(tmp));
-                        color = &tmp;
-                        break;
-                }
-                if (k == 0) {
-                    buf_vbo[buf_vbo_len++] = color->r / 255.0f;
-                    buf_vbo[buf_vbo_len++] = color->g / 255.0f;
-                    buf_vbo[buf_vbo_len++] = color->b / 255.0f;
-#ifdef TARGET_WII_U
-                    if (!use_alpha) {
-                        buf_vbo[buf_vbo_len++] = 1.0f;
-                    }
-#endif
-                } else {
-                    if (use_fog && color == &v_arr[i]->color) {
-                        // Shade alpha is 100% for fog
-                        buf_vbo[buf_vbo_len++] = 1.0f;
-                    } else {
-                        buf_vbo[buf_vbo_len++] = color->a / 255.0f;
-                    }
-                }
-            }
-        }
-        /*struct RGBA *color = &v_arr[i]->color;
-        buf_vbo[buf_vbo_len++] = color->r / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->g / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->b / 255.0f;
-        buf_vbo[buf_vbo_len++] = color->a / 255.0f;*/
+        triangle_state.comb = comb;
+        triangle_state.num_inputs = num_inputs;
+        triangle_state.use_alpha = use_alpha;
+        triangle_state.use_fog = use_fog;
+        triangle_state.use_texture = use_texture;
+        triangle_state.tex_width = tex_width;
+        triangle_state.tex_height = tex_height;
+        triangle_state.z_is_from_0_to_1 = z_is_from_0_to_1;
+        triangle_state.valid = true;
+    } else {
+        comb = triangle_state.comb;
+        num_inputs = triangle_state.num_inputs;
+        use_alpha = triangle_state.use_alpha;
+        use_fog = triangle_state.use_fog;
+        use_texture = triangle_state.use_texture;
+        tex_width = triangle_state.tex_width;
+        tex_height = triangle_state.tex_height;
+        z_is_from_0_to_1 = triangle_state.z_is_from_0_to_1;
     }
-    if (++buf_vbo_num_tris == MAX_BUFFERED_TRIANGLES) {
+#endif
+
+#ifdef TARGET_WII_U
+    if (buf_vbo_len == 0) {
+        buf_vbo_indexed = gfx_rapi == &gfx_gx2_api &&
+                          gfx_gx2_packed_colors() && gfx_gx2_indexed();
+        buf_unique_vertices = 0;
+        wiiu_vertex_cache_batch(&vertex_reuse);
+        // Acquire only after all material/texture changes have flushed. No
+        // backend work can move this reservation while the batch is filled.
+        float *direct = gfx_rapi == &gfx_gx2_api
+            ? gfx_gx2_reserve_vertices((size_t)GFX_TRIANGLE_LIMIT * 28 * 3) : NULL;
+        buf_vbo = direct != NULL ? direct : buf_vbo_fallback;
+    }
+#endif
+#ifdef TARGET_WII_U
+    if (!triangle_state.attributes_valid)
+        gfx_prepare_material_values(comb, num_inputs, use_alpha, use_fog);
+    bool use_packed_colors = gfx_rapi == &gfx_gx2_api && gfx_gx2_packed_colors();
+    if (use_packed_colors) {
+        if (buf_vbo_indexed) {
+#define GFX_INDEXED_GEOMETRY
+#define GFX_PREPARED_MATERIAL
+#define GFX_PACKED_COLORS
+#define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#define EMIT_RGBA(r,g,b,a) wiiu_vertex_store_rgba8(&buf_vbo[buf_vbo_len++], (r), (g), (b), (a))
+#include "gfx_triangle_emit.inc.h"
+#undef EMIT_RGBA
+#undef EMIT_FLOAT
+#undef GFX_PACKED_COLORS
+#undef GFX_PREPARED_MATERIAL
+#undef GFX_INDEXED_GEOMETRY
+        } else {
+#define GFX_PREPARED_MATERIAL
+#define GFX_PACKED_COLORS
+#define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#define EMIT_RGBA(r,g,b,a) wiiu_vertex_store_rgba8(&buf_vbo[buf_vbo_len++], (r), (g), (b), (a))
+#include "gfx_triangle_emit.inc.h"
+#undef EMIT_RGBA
+#undef EMIT_FLOAT
+#undef GFX_PACKED_COLORS
+#undef GFX_PREPARED_MATERIAL
+        }
+    } else
+#endif
+    {
+#ifdef TARGET_WII_U
+#define GFX_PREPARED_MATERIAL
+#endif
+#define EMIT_FLOAT(value) (buf_vbo[buf_vbo_len++] = (value))
+#include "gfx_triangle_emit.inc.h"
+#undef EMIT_FLOAT
+#ifdef GFX_PREPARED_MATERIAL
+#undef GFX_PREPARED_MATERIAL
+#endif
+    }
+    if (++buf_vbo_num_tris == GFX_TRIANGLE_LIMIT) {
         gfx_flush();
     }
 }
@@ -1830,6 +2029,9 @@ static void gfx_dp_set_fill_color(uint32_t packed_color) {
 }
 
 static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry) {
+#ifdef TARGET_WII_U
+    triangle_state.valid = false;
+#endif
     uint32_t saved_other_mode_h = rdp.other_mode_h;
     uint32_t cycle_type = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE));
 
@@ -1895,6 +2097,10 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
     if (cycle_type == G_CYC_COPY) {
         rdp.other_mode_h = saved_other_mode_h;
     }
+#ifdef TARGET_WII_U
+    // The rectangle temporarily changes geometry mode, viewport and filtering.
+    triangle_state.valid = false;
+#endif
 }
 
 static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry, UNUSED uint8_t tile, int16_t uls, int16_t ult, int16_t dsdx, int16_t dtdy, bool flip) {
@@ -2003,6 +2209,17 @@ static void gfx_run_dl(Gfx* cmd) {
     //int dummy = 0;
     for (;;) {
         uint32_t opcode = cmd->words.w0 >> 24;
+#ifdef TARGET_WII_U
+        // Only vertex loads and triangles leave all material state unchanged.
+        // Invalidate conservatively for everything else, even unknown opcodes.
+        if (opcode != G_VTX && opcode != (uint8_t)G_TRI1
+#if defined(F3DEX_GBI) || defined(F3DLP_GBI)
+            && opcode != (uint8_t)G_TRI2
+#endif
+        ) {
+            triangle_state.valid = false;
+        }
+#endif
 
 #if defined(TARGET_WII_U) && defined(EXT_OPTIONS_MENU)
         if (gfx_wiiu_skip_to_options_menu) {
@@ -2557,6 +2774,7 @@ uint16_t *get_framebuffer() {
 
 void gfx_start_frame(void) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
+    memset(&gfx_gx2_frame_profile, 0, sizeof(gfx_gx2_frame_profile));
     gfx_vcutm_profile.frame_begin_us = osGetTime();
     gfx_vcutm_profile.run_begin_us = 0;
     gfx_vcutm_profile.dl_begin_us = 0;
@@ -2564,6 +2782,13 @@ void gfx_start_frame(void) {
     gfx_vcutm_profile.run_end_us = 0;
     gfx_vcutm_profile.draw_calls = 0;
     gfx_vcutm_profile.triangles = 0;
+    model_geometry_profile.vertex_us = 0;
+    model_geometry_profile.submit_us = 0;
+    model_geometry_profile.vertices = 0;
+    model_geometry_profile.batches = 0;
+    model_geometry_profile.full_flushes = 0;
+    model_geometry_profile.material_prepares = 0;
+    model_geometry_profile.uniform_prepares = 0;
 #endif
     gfx_wapi->handle_events();
 #ifndef TARGET_N3DS
@@ -2572,6 +2797,17 @@ void gfx_start_frame(void) {
 }
 
 void gfx_run(Gfx *commands) {
+#ifdef TARGET_WII_U
+    triangle_state.valid = false;
+    static bool previous_packed_colors;
+    bool packed = gfx_gx2_packed_colors();
+    if (packed != previous_packed_colors) {
+        // Bind the matching fetch shader through the usual material path,
+        // after start_frame has acquired a valid foreground GPU context.
+        rendering_state.shader_program = NULL;
+        previous_packed_colors = packed;
+    }
+#endif
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
     gfx_vcutm_profile.run_begin_us = osGetTime();
 #endif
@@ -2607,8 +2843,29 @@ void gfx_run(Gfx *commands) {
 #if defined(EXTERNAL_DATA) && defined(TARGET_WII_U) && defined(WIIU_LOAD_TIMING_PROFILE)
 static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_end_us,
                                     uint64_t present_end_us) {
-    if (gCurrLevelNum != LEVEL_VCUTM || gfx_vcutm_profile.run_begin_us == 0) {
+    if (!geometry_ab_measure) {
+        gfx_profile_ab_clear_window();
+        return;
+    }
+    static int previous_level = -1;
+    static unsigned previous_model = ~0u;
+#ifdef DYNOS
+    const unsigned model = dynos_active_player_choice();
+#else
+    const unsigned model = 0;
+#endif
+    if (gCurrLevelNum != previous_level || model != previous_model) {
         memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+        memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+        memset(model_phase_profile, 0, sizeof(model_phase_profile));
+        previous_level = gCurrLevelNum;
+        previous_model = model;
+        return;
+    }
+    if (gfx_vcutm_profile.run_begin_us == 0) {
+        memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
+        memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+        memset(model_phase_profile, 0, sizeof(model_phase_profile));
         return;
     }
 
@@ -2622,8 +2879,55 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
     const uint64_t present_us = present_end_us - finish_end_us;
     const uint64_t interval_us = gfx_vcutm_profile.previous_present_us != 0
         ? present_end_us - gfx_vcutm_profile.previous_present_us : 0;
+    static uint64_t last_spike_log_us;
+    const bool target_60 = pc_get_render_frame_multiplier() > 1.0f;
+    if (interval_us >= (target_60 ? 33000 : 66000) && present_end_us - last_spike_log_us >= 1000000) {
+        WHBLogPrintf("MODEL_SPIKE level=%d model=%u phase=%s interval_us=%llu total_us=%llu dl_us=%llu post_submit_us=%llu audio_us=%llu finish_us=%llu present_us=%llu draws=%u triangles=%u",
+                     (int) gCurrLevelNum, model, gfx_profile_interpolated ? "interpolated" : "current", (unsigned long long) interval_us,
+                     (unsigned long long) total_us, (unsigned long long) dl_us,
+                     (unsigned long long) post_submit_us, (unsigned long long) audio_us,
+                     (unsigned long long) finish_us, (unsigned long long) present_us,
+                     (unsigned) gfx_vcutm_profile.draw_calls,
+                     (unsigned) gfx_vcutm_profile.triangles);
+        last_spike_log_us = present_end_us;
+    }
+    if (gfx_vcutm_profile.previous_present_us != 0) ++gfx_vcutm_profile.interval_count;
     gfx_vcutm_profile.previous_present_us = present_end_us;
+    struct ModelPhaseProfile *phase = &model_phase_profile[gfx_profile_interpolated ? 1 : 0];
+    ++phase->frames;
+    if (interval_us >= (target_60 ? 25000 : 50000)) ++phase->slow_intervals;
+    phase->total_us += total_us;
+    phase->pre_us += pre_submit_us;
+    phase->dl_us += dl_us;
+    phase->vertex_us += model_geometry_profile.vertex_us;
+    phase->submit_us += model_geometry_profile.submit_us;
+    phase->audio_us += audio_us;
+    phase->post_us += post_submit_us;
+    phase->finish_us += finish_us;
+    phase->present_us += present_us;
+    if (total_us > phase->max_total_us) phase->max_total_us = total_us;
+    if (finish_us > phase->max_finish_us) phase->max_finish_us = finish_us;
+    phase->draws += gfx_vcutm_profile.draw_calls;
+    phase->triangles += gfx_vcutm_profile.triangles;
+    for (unsigned i = 0; i < WIIU_GX2_PROFILE_COUNT; ++i)
+        phase->backend.ticks[i] += gfx_gx2_frame_profile.ticks[i];
+    phase->backend.vbo_bytes += gfx_gx2_frame_profile.vbo_bytes;
+    phase->backend.ibo_bytes += gfx_gx2_frame_profile.ibo_bytes;
+    phase->backend.submitted_vertices += gfx_gx2_frame_profile.submitted_vertices;
+    phase->backend.indexed_draws += gfx_gx2_frame_profile.indexed_draws;
+    phase->backend.allocations += gfx_gx2_frame_profile.allocations;
+    phase->backend.draw_calls += gfx_gx2_frame_profile.draw_calls;
+    phase->backend.vsync_waits += gfx_gx2_frame_profile.vsync_waits;
+    phase->backend.direct_draws += gfx_gx2_frame_profile.direct_draws;
+    phase->backend.copied_draws += gfx_gx2_frame_profile.copied_draws;
     gfx_vcutm_profile.frames++;
+    model_geometry_profile.vertex_sum_us += model_geometry_profile.vertex_us;
+    model_geometry_profile.submit_sum_us += model_geometry_profile.submit_us;
+    model_geometry_profile.vertices_sum += model_geometry_profile.vertices;
+    model_geometry_profile.batches_sum += model_geometry_profile.batches;
+    model_geometry_profile.full_flushes_sum += model_geometry_profile.full_flushes;
+    model_geometry_profile.material_prepares_sum += model_geometry_profile.material_prepares;
+    model_geometry_profile.uniform_prepares_sum += model_geometry_profile.uniform_prepares;
     gfx_vcutm_profile.interval_sum_us += interval_us;
     gfx_vcutm_profile.total_sum_us += total_us;
     gfx_vcutm_profile.pre_submit_sum_us += pre_submit_us;
@@ -2663,9 +2967,23 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
 
     if (gfx_vcutm_profile.frames == 120) {
         const uint64_t fps_x1000 = gfx_vcutm_profile.interval_sum_us != 0
-            ? (uint64_t) 119 * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
+            ? (uint64_t) gfx_vcutm_profile.interval_count * 1000000000ULL / gfx_vcutm_profile.interval_sum_us : 0;
         gfx_vcutm_window_sequence++;
-        WHBLogPrintf("LOADTIME_VCUTM_TIMING window=%u frames=120 fps_x1000=%llu avg_total_us=%llu max_total_us=%llu avg_pre_submit_us=%llu max_pre_submit_us=%llu avg_setup_us=%llu max_setup_us=%llu avg_dl_us=%llu max_dl_us=%llu avg_post_submit_us=%llu max_post_submit_us=%llu avg_audio_us=%llu max_audio_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu max_present_us=%llu",
+        WHBLogPrintf("MODEL_BUFFER_WINDOW revision=11 control=manual window=%u triangles=%u target_fps=%u packed_colors=1 indexed=1 pool_bytes=%llu",
+            (unsigned)gfx_vcutm_window_sequence, buf_triangle_limit,
+            (unsigned)(30.0f * pc_get_render_frame_multiplier()),
+            (unsigned long long)gfx_gx2_vbo_reserved_bytes());
+        WHBLogPrintf("MODEL_GEOMETRY revision=11 window=%u level=%d model=%u avg_vertex_us=%llu avg_submit_us=%llu avg_loaded_vertices=%llu avg_vertex_batches=%llu avg_capacity_flushes=%llu avg_material_prepares=%llu avg_uniform_prepares=%llu",
+                     (unsigned) gfx_vcutm_window_sequence, (int) gCurrLevelNum, model,
+                     (unsigned long long) (model_geometry_profile.vertex_sum_us / 120),
+                     (unsigned long long) (model_geometry_profile.submit_sum_us / 120),
+                     (unsigned long long) (model_geometry_profile.vertices_sum / 120),
+                     (unsigned long long) (model_geometry_profile.batches_sum / 120),
+                     (unsigned long long) (model_geometry_profile.full_flushes_sum / 120),
+                     (unsigned long long) (model_geometry_profile.material_prepares_sum / 120),
+                     (unsigned long long) (model_geometry_profile.uniform_prepares_sum / 120));
+        WHBLogPrintf("MODEL_PROFILE level=%d model=%u window=%u frames=120 fps_x1000=%llu avg_total_us=%llu max_total_us=%llu avg_pre_submit_us=%llu max_pre_submit_us=%llu avg_setup_us=%llu max_setup_us=%llu avg_dl_us=%llu max_dl_us=%llu avg_post_submit_us=%llu max_post_submit_us=%llu avg_audio_us=%llu max_audio_us=%llu avg_finish_us=%llu max_finish_us=%llu avg_present_us=%llu max_present_us=%llu",
+                     (int) gCurrLevelNum, model,
                      (unsigned) gfx_vcutm_window_sequence,
                      (unsigned long long) fps_x1000,
                      (unsigned long long) (gfx_vcutm_profile.total_sum_us / 120),
@@ -2704,8 +3022,11 @@ static void gfx_profile_vcutm_frame(uint64_t finish_begin_us, uint64_t finish_en
                      (int) gfx_vcutm_profile.worst_focus_z,
                      (int) gfx_vcutm_profile.worst_camera_yaw);
         const uint64_t previous_present_us = gfx_vcutm_profile.previous_present_us;
+        gfx_profile_report_phases((unsigned)gfx_vcutm_window_sequence, (int)gCurrLevelNum, model);
         memset(&gfx_vcutm_profile, 0, sizeof(gfx_vcutm_profile));
         gfx_vcutm_profile.previous_present_us = previous_present_us;
+        memset(&model_geometry_profile, 0, sizeof(model_geometry_profile));
+        memset(model_phase_profile, 0, sizeof(model_phase_profile));
     }
 }
 #endif

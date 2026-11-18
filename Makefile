@@ -292,6 +292,15 @@ else
 endif
 
 BASEPACK ?= base.zip
+WIIU_MINIMAP ?= 0
+$(eval $(call validate-option,WIIU_MINIMAP,0 1))
+ifeq ($(WIIU_MINIMAP),1)
+  ifneq ($(TARGET_WII_U)$(EXTERNAL_DATA),11)
+    $(error WIIU_MINIMAP=1 requires TARGET_WII_U=1 and EXTERNAL_DATA=1)
+  endif
+  WIIU_MINIMAP_DIR := build/minimap
+  DEFINES += WIIU_MINIMAP=1
+endif
 
 
 #==============================================================================#
@@ -774,6 +783,9 @@ endif
 #==============================================================================#
 
 INCLUDE_DIRS := include $(BUILD_DIR) $(BUILD_DIR)/include src .
+ifeq ($(WIIU_MINIMAP),1)
+  INCLUDE_DIRS += $(WIIU_MINIMAP_DIR)
+endif
 ifeq ($(TARGET_N64),1)
   INCLUDE_DIRS += include/gcc
 endif
@@ -1296,6 +1308,21 @@ all: $(BASEPACK_PATH)
 res: $(BASEPACK_PATH)
 
 # prepares the basepack.lst
+ifeq ($(WIIU_MINIMAP),1)
+$(WIIU_MINIMAP_DIR)/pack.lst:
+	@echo "Stage the extractor manifest with tools/prepare_wiiu_minimaps.py first." >&2
+	@false
+
+$(WIIU_MINIMAP_DIR)/wiiu_minimap_generated.inc.h:
+	@echo "Stage the extractor manifest with tools/prepare_wiiu_minimaps.py first." >&2
+	@false
+
+$(BUILD_DIR)/src/pc/wiiu_minimap.o: $(WIIU_MINIMAP_DIR)/wiiu_minimap_generated.inc.h
+
+$(BASEPACK_LST): $(WIIU_MINIMAP_DIR)/pack.lst $(wildcard $(WIIU_MINIMAP_DIR)/*.png)
+$(BASEPACK_LST): $(wildcard textures/minimap/theme/*.png)
+endif
+
 $(BASEPACK_LST): $(EXE_DEPEND)
 	@$(PRINT) "$(GREEN)Generating external data list: $(BLUE)$@ $(NO_COL)\n"
 	@mkdir -p $(BUILD_DIR)/$(BASEDIR)
@@ -1312,6 +1339,9 @@ $(BASEPACK_LST): $(EXE_DEPEND)
 	@find actors -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
 	@find levels -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
 	@find textures -name \*.png ! -path 'textures/skyboxes/*' -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
+  ifeq ($(WIIU_MINIMAP),1)
+	@cat $(WIIU_MINIMAP_DIR)/pack.lst >> $(BASEPACK_LST)
+  endif
   ifeq ($(PORT_MOP_OBJS),1)
 	@find src/extras/mop/actors -name \*.png -exec echo "{} gfx/{}" >> $(BASEPACK_LST) \;
   endif

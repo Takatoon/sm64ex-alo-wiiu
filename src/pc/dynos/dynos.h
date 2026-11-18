@@ -30,6 +30,7 @@ void *dynos_texture_read(const char *path, uint64_t *size);
 unsigned int dynos_player_count(void);
 const unsigned char **dynos_player_labels(void);
 extern unsigned int dynos_player_choice;
+unsigned int dynos_active_player_choice(void);
 #ifdef __cplusplus
 }
 #endif

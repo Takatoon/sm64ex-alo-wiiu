@@ -302,6 +302,9 @@ u64 *func_sh_802EDF24(u64 *cmd, s16 reverbIndex, s16 updateIndex) {
 }
 
 u64 *synthesis_do_one_audio_update(s16 *aiBuf, s32 bufLen, u64 *cmd, s32 updateIndex) {
+#ifdef WIIU_MINIMAP
+    mixer_gamepad_chunk(aiBuf, bufLen, DMEM_ADDR_LEFT_CH, DMEM_ADDR_RIGHT_CH);
+#endif
     struct NoteSubEu *noteSubEu;
     u8 noteIndices[56];
     s32 temp;
@@ -716,6 +719,9 @@ skip:
     } else {
         leftRight = 0;
     }
+#ifdef WIIU_MINIMAP
+    mixer_gamepad_note_begin(gNotes[noteIndex].gamepadAlert);
+#endif
     cmd = process_envelope(cmd, noteSubEu, synthesisState, bufLen, DMEM_ADDR_TEMP, leftRight, flags);
     if (noteSubEu->usesHeadsetPanEffects) {
         if ((flags & 1) == 0) {
@@ -723,6 +729,9 @@ skip:
         }
         cmd = note_apply_headset_pan_effects(cmd, noteSubEu, synthesisState, bufLen * 2, flags, leftRight);
     }
+#ifdef WIIU_MINIMAP
+    mixer_gamepad_note_end();
+#endif
 
     return cmd;
 }
